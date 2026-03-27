@@ -1,6 +1,24 @@
 # RemodexOnAnyDevices
 
-RemodexOnAnyDevices is a local-first fork/rework of [Emanuele-web04/remodex](https://github.com/Emanuele-web04/remodex). It keeps the Codex runtime on your own machine and expands the client surface so the project can be used across iPhone and browser-based workflows without reintroducing hosted-service assumptions.
+RemodexOnAnyDevices is a cross-platform version of [remodex](https://github.com/Emanuele-web04/remodex). It enables you to keep vibe coding from your phone at the gym or to use Codex-app on your remote server (which is not directly supported by the official Codex app). It keeps the Codex runtime on your own machine and expands the client surface so the project can be used across any platforms and browser-based workflows without reintroducing hosted-service assumptions.
+
+The upstream ISC license is preserved in [LICENSE](LICENSE).
+
+## Demo
+
+<div align="center">
+  <img src="assets/demo(1).jpg" alt="demo1" width="20%" style="margin: 10px;">
+  <img src="assets/demo(2).jpg" alt="demo2" width="20%" style="margin: 10px;">
+  <img src="assets/demo(3).jpg" alt="demo3" width="60%" style="margin: 10px;">
+</div>
+
+## Differences between remodex
+
+- login via password (no need to QR pairing)
+- trusted reconnects, and local bridge sessions
+- better support windows and linux deployment
+
+## Details
 
 This repository currently contains:
 
@@ -8,22 +26,6 @@ This repository currently contains:
 - `CodexMobile/`: the SwiftUI iOS client
 - `web-client/`: a local web UI for pairing, thread browsing, and chat
 - `relay/`: the relay service used by local/self-hosted setups
-
-## Upstream Attribution
-
-This project is derived from the original Remodex work by Emanuele Di Pietro:
-
-- Upstream repository: <https://github.com/Emanuele-web04/remodex>
-- Upstream license: ISC
-
-The upstream ISC license is preserved in this fork. See [LICENSE](LICENSE).
-
-## Current Focus
-
-- Keep the project local-first and self-host friendly
-- Avoid hardcoded production domains or hosted-only workflows
-- Support QR pairing, trusted reconnects, and local bridge sessions
-- Improve browser/mobile usability without changing the underlying local control model
 
 ## Quick Start
 
@@ -56,9 +58,3 @@ The web client is intended for local administration and chat access against your
 - it now includes a mobile-oriented chat layout instead of a desktop-only squeeze-down
 
 See [web-client/README.md](web-client/README.md) for details.
-
-## Repository Notes
-
-- Local state, pairing payloads, session logs, and generated admin credentials are intentionally ignored and should not be committed
-- If you publish or redistribute this fork, keep the upstream license notice intact
-- If you want the original project context and broader app architecture, review the upstream repository and this repo's source side-by-side
