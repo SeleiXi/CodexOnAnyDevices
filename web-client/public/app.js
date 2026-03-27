@@ -49,9 +49,9 @@ const elements = {
   sessionExpiryLabel: document.querySelector("#session-expiry-label"),
   pairedMacLabel: document.querySelector("#paired-mac-label"),
   pairedMacName: document.querySelector("#paired-mac-name"),
+  sidebarTools: document.querySelector("#sidebar-tools"),
   threadSearchInput: document.querySelector("#thread-search-input"),
   threadList: document.querySelector("#thread-list"),
-  newThreadButton: document.querySelector("#new-thread-button"),
   threadTitle: document.querySelector("#thread-title"),
   threadSubtitle: document.querySelector("#thread-subtitle"),
   connectionBadge: document.querySelector("#connection-badge"),
@@ -131,7 +131,6 @@ function bindEvents() {
     state.searchQuery = elements.threadSearchInput.value.trim().toLowerCase();
     renderThreads();
   });
-  elements.newThreadButton.addEventListener("click", createThreadAndSelect);
   elements.homePrimaryButton.addEventListener("click", handleHomePrimaryAction);
   elements.homeSecondaryButton.addEventListener("click", handleHomeSecondaryAction);
   elements.statusBannerAction.addEventListener("click", handleBannerAction);
@@ -353,7 +352,7 @@ function renderCurrentView() {
 }
 
 function ensureSidebarSettingsButton() {
-  if (elements.sidebarSettingsButton || !elements.newThreadButton?.parentElement) {
+  if (elements.sidebarSettingsButton || !elements.sidebarTools) {
     return;
   }
 
@@ -362,7 +361,7 @@ function ensureSidebarSettingsButton() {
   button.type = "button";
   button.className = "toolbar-button mobile-only sidebar-menu-button";
   button.textContent = "Settings";
-  elements.newThreadButton.insertAdjacentElement("afterend", button);
+  elements.sidebarTools.appendChild(button);
   elements.sidebarSettingsButton = button;
 }
 
@@ -739,7 +738,7 @@ function renderConnectionState() {
       ? `Last disconnect: ${state.status.lastDisconnect.reason}`
       : "Load a pairing payload to connect.";
 
-  elements.pairedMacLabel.textContent = isConnected ? "Connected to Mac" : state.status?.macDeviceId ? "Saved Mac" : "No Pairing";
+  elements.pairedMacLabel.textContent = isConnected ? "Connected to Computer" : state.status?.macDeviceId ? "Saved Mac" : "No Pairing";
   elements.pairedMacName.textContent = state.status?.macDeviceId
     ? shortDeviceId(state.status.macDeviceId)
     : "No pairing yet";
@@ -938,7 +937,7 @@ function renderHomeState() {
 
   if (savedMac) {
     elements.trustedPairCard.hidden = false;
-    elements.trustedPairTitle.textContent = isConnected ? "Connected to Mac" : "Saved Mac";
+    elements.trustedPairTitle.textContent = isConnected ? "Connected to Computer" : "Saved Mac";
     elements.trustedPairName.textContent = shortDeviceId(savedMac);
     elements.trustedPairDetail.textContent = isConnected
       ? "Secure session is active and ready for chat sync."

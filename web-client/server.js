@@ -429,19 +429,38 @@ class RemodexWebClient {
   }
 
   async readThread(threadId) {
-    const response = await this.sendRequest("thread/read", {
-      threadId,
-      includeTurns: true,
-    });
-    const threadObject = response.result?.thread;
-    if (!threadObject) {
-      throw new Error("thread/read response missing thread");
-    }
+    try {
+      const response = await this.sendRequest("thread/read", {
+        threadId,
+        includeTurns: true,
+      });
+      const threadObject = response.result?.thread;
+      if (!threadObject) {
+        throw new Error("thread/read response missing thread");
+      }
 
-    return {
-      thread: decodeThreadSummary(threadObject),
-      messages: decodeThreadMessages(threadId, threadObject),
-    };
+      return {
+        thread: decodeThreadSummary(threadObject),
+        messages: decodeThreadMessages(threadId, threadObject),
+      };
+    } catch (error) {
+      if (!shouldTreatThreadAsEmpty(error)) {
+        throw error;
+      }
+
+      const response = await this.sendRequest("thread/read", {
+        threadId,
+      });
+      const threadObject = response.result?.thread;
+      if (!threadObject) {
+        throw error;
+      }
+
+      return {
+        thread: decodeThreadSummary(threadObject),
+        messages: [],
+      };
+    }
   }
 
   async respondToApproval(decision) {
@@ -1326,6 +1345,16 @@ function shouldIgnoreThreadResumeFailure(error) {
     || message.includes("not materialized")
     || message.includes("thread not found")
     || message.includes("no rollout found");
+}
+
+function shouldTreatThreadAsEmpty(error) {
+  const rpcError = extractRpcError(error);
+  if (!rpcError) {
+    return false;
+  }
+  const message = rpcError.message.toLowerCase();
+  return message.includes("not materialized")
+    || (message.includes("includeturns") && message.includes("before first user message"));
 }
 
 function extractRpcError(error) {
