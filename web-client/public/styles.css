@@ -848,9 +848,9 @@ button:disabled {
   flex: 1 1 auto;
   overflow: auto;
   min-height: 0;
-  display: grid;
-  align-content: start;
-  justify-items: start;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   gap: 14px;
   padding: 6px 4px 26px 0;
   overscroll-behavior: contain;
@@ -860,7 +860,10 @@ button:disabled {
 .message-card {
   width: min(100%, var(--message-max-width));
   max-width: min(100%, var(--message-max-width));
-  display: grid;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   gap: 8px;
   padding: 14px 15px;
   border-radius: 22px;
@@ -871,14 +874,10 @@ button:disabled {
 }
 
 .message-card.role-user {
-  justify-self: end;
+  margin-left: auto;
   width: min(100%, var(--message-user-max-width));
   background: rgba(15, 23, 32, 0.94);
   color: white;
-}
-
-.message-card.role-assistant {
-  justify-self: start;
 }
 
 .message-card.role-user .message-head {
@@ -886,7 +885,7 @@ button:disabled {
 }
 
 .message-card.role-system {
-  justify-self: center;
+  margin-inline: auto;
   width: min(100%, 34rem);
   max-width: min(100%, 34rem);
   background: rgba(15, 23, 32, 0.06);
@@ -913,6 +912,7 @@ button:disabled {
 .message-card pre {
   font-family: var(--font-sans);
   max-width: 100%;
+  min-height: 1lh;
   overflow-x: hidden;
 }
 
