@@ -560,7 +560,7 @@ async function refreshThreads() {
 
   try {
     const response = await api("/api/threads");
-    state.threads = response.threads || [];
+    state.threads = mergePendingActiveThread(response.threads || []);
     const prioritizedThreads = prioritizeThreads(state.threads);
     if (!state.activeThreadId && prioritizedThreads.length > 0) {
       state.activeThreadId = prioritizedThreads[0].id;
@@ -598,9 +598,14 @@ async function createThreadAndSelect(options = {}) {
       },
     });
     state.activeThreadId = response.thread.id;
+    state.activeThread = response.thread;
+    state.messages = [];
+    state.threads = mergePendingActiveThread(state.threads);
     if (preferredProjectPath) {
       elements.projectPath.value = preferredProjectPath;
     }
+    renderMessages();
+    renderThreads();
     await refreshThreads();
   } catch (error) {
     showAppError(error.message);
@@ -1416,6 +1421,17 @@ function defaultModelDisplayName() {
 
 function activeModelDisplayName() {
   return selectedModelOption()?.displayName || state.selectedModelId || defaultModelDisplayName();
+}
+
+function mergePendingActiveThread(threads) {
+  const nextThreads = Array.isArray(threads) ? [...threads] : [];
+  if (!state.activeThreadId || !state.activeThread || state.activeThread.id !== state.activeThreadId) {
+    return nextThreads;
+  }
+  if (nextThreads.some((thread) => thread.id === state.activeThreadId)) {
+    return nextThreads;
+  }
+  return [state.activeThread, ...nextThreads];
 }
 
 function effectiveModelOption() {
