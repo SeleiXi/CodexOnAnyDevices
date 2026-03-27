@@ -1410,10 +1410,16 @@ function decodeModelOption(modelObject) {
     description: stringOrEmpty(modelObject.description),
     isDefault: Boolean(modelObject.isDefault ?? modelObject.is_default),
     supportedReasoningEfforts: decodeReasoningEfforts(
-      modelObject.supportedReasoningEfforts || modelObject.supported_reasoning_efforts
+      modelObject.supportedReasoningEfforts
+      || modelObject.supported_reasoning_efforts
+      || modelObject.supportedReasoningLevels
+      || modelObject.supported_reasoning_levels
     ),
     defaultReasoningEffort: stringOrEmpty(
-      modelObject.defaultReasoningEffort || modelObject.default_reasoning_effort
+      modelObject.defaultReasoningEffort
+      || modelObject.default_reasoning_effort
+      || modelObject.defaultReasoningLevel
+      || modelObject.default_reasoning_level
     ),
   };
 }
@@ -1430,7 +1436,9 @@ function decodeReasoningEfforts(value) {
       if (!entry || typeof entry !== "object") {
         return null;
       }
-      const reasoningEffort = stringOrEmpty(entry.reasoningEffort || entry.reasoning_effort);
+      const reasoningEffort = stringOrEmpty(
+        entry.reasoningEffort || entry.reasoning_effort || entry.effort
+      );
       if (!reasoningEffort) {
         return null;
       }
