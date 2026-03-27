@@ -191,7 +191,6 @@ select:focus {
 .support-copy,
 .thread-subcopy,
 .thread-time,
-.message-head,
 .composer-hint,
 .meta-pill span,
 .banner-copy,
@@ -202,7 +201,6 @@ select:focus {
 }
 
 .thread-time,
-.message-head,
 .meta-pill span,
 .paired-mac .micro-label,
 .section-heading .micro-label {
@@ -939,23 +937,11 @@ button:disabled {
   color: white;
 }
 
-.message-card.role-user .message-head {
-  color: rgba(255, 255, 255, 0.62);
-}
-
 .message-card.role-system {
   margin-inline: auto;
   width: min(100%, 34rem);
   max-width: min(100%, 34rem);
   background: rgba(15, 23, 32, 0.06);
-}
-
-.message-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: 0.75rem;
-  text-transform: uppercase;
 }
 
 .message-card pre,
@@ -1235,10 +1221,6 @@ button:disabled {
   .message-card.role-system {
     width: 100%;
     max-width: 100%;
-  }
-
-  .message-head {
-    flex-wrap: wrap;
   }
 
   .home-actions,

@@ -882,13 +882,7 @@ function renderMessages() {
   for (const message of state.messages) {
     const article = document.createElement("article");
     article.className = `message-card role-${message.role}`;
-    article.innerHTML = `
-      <header class="message-head">
-        <span>${escapeHTML(message.role)}</span>
-        <time>${escapeHTML(formatTimestamp(message.createdAt))}</time>
-      </header>
-      <pre>${escapeHTML(message.text)}</pre>
-    `;
+    article.innerHTML = `<pre>${escapeHTML(message.text)}</pre>`;
     elements.messageList.appendChild(article);
   }
 
