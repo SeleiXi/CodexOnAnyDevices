@@ -581,22 +581,27 @@ async function refreshThreads() {
   }
 }
 
-async function createThreadAndSelect() {
+async function createThreadAndSelect(options = {}) {
   if (!isBridgeConnected()) {
     showAppError("Connect the bridge before creating a thread.");
     setCurrentView("connection");
     return;
   }
+
+  const preferredProjectPath = resolvePreferredProjectPath(options.preferredProjectPath);
   try {
     const response = await api("/api/threads", {
       method: "POST",
       body: {
-        cwd: elements.projectPath.value,
+        cwd: preferredProjectPath,
         accessMode: elements.accessMode.value,
         model: selectedModelRequestValue(),
       },
     });
     state.activeThreadId = response.thread.id;
+    if (preferredProjectPath) {
+      elements.projectPath.value = preferredProjectPath;
+    }
     await refreshThreads();
   } catch (error) {
     showAppError(error.message);
@@ -794,10 +799,27 @@ function renderThreads() {
 
     const heading = document.createElement("header");
     heading.className = "thread-group-heading";
-    heading.innerHTML = `
+    const headingLabel = document.createElement("div");
+    headingLabel.className = "thread-group-heading-label";
+    headingLabel.innerHTML = `
       <span>${escapeHTML(group.label)}</span>
       <span>${group.threads.length}</span>
     `;
+    heading.appendChild(headingLabel);
+
+    if (group.projectPath) {
+      const createButton = document.createElement("button");
+      createButton.type = "button";
+      createButton.className = "thread-group-action";
+      createButton.textContent = "New";
+      createButton.addEventListener("click", async () => {
+        await createThreadAndSelect({
+          preferredProjectPath: group.projectPath,
+        });
+      });
+      heading.appendChild(createButton);
+    }
+
     section.appendChild(heading);
 
     for (const thread of group.threads) {
@@ -1504,6 +1526,7 @@ function groupThreads(threads) {
       groups.set(key, {
         key,
         label,
+        projectPath: cwd || "",
         threads: [],
       });
     }
@@ -1529,6 +1552,7 @@ function groupThreads(threads) {
     {
       key: "__pinned__",
       label: "Pinned",
+      projectPath: "",
       threads: pinnedThreads,
     },
     ...projectGroups,
@@ -1559,6 +1583,26 @@ function isPinnedThread(threadId, thread = null) {
     return true;
   }
   return Boolean(thread?.pinned);
+}
+
+function resolvePreferredProjectPath(preferredProjectPath) {
+  const explicitProjectPath = String(preferredProjectPath || "").trim();
+  if (explicitProjectPath) {
+    return explicitProjectPath;
+  }
+
+  const composerProjectPath = String(elements.projectPath.value || "").trim();
+  if (composerProjectPath) {
+    return composerProjectPath;
+  }
+
+  const activeThreadProjectPath = String(state.activeThread?.cwd || "").trim();
+  if (activeThreadProjectPath) {
+    return activeThreadProjectPath;
+  }
+
+  const firstProjectThread = prioritizeThreads(state.threads).find((thread) => String(thread.cwd || "").trim());
+  return String(firstProjectThread?.cwd || "").trim();
 }
 
 function describeActiveThreadSubtitle(thread) {

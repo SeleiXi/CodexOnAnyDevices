@@ -587,10 +587,32 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 8px 10px;
   color: var(--muted);
   font-family: var(--font-mono);
   font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.thread-group-heading-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.thread-group-action {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 32, 0.06);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
   text-transform: uppercase;
 }
 
