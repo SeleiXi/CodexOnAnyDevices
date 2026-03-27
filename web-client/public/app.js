@@ -12,6 +12,9 @@ const state = {
   lastCompactLayout: window.innerWidth <= 980,
   isConnecting: false,
   isDisconnecting: false,
+  availableModels: [],
+  selectedModelId: "",
+  pinnedThreadIds: [],
   threads: [],
   searchQuery: "",
   activeThreadId: "",
@@ -50,6 +53,7 @@ const elements = {
   newThreadButton: document.querySelector("#new-thread-button"),
   threadTitle: document.querySelector("#thread-title"),
   threadSubtitle: document.querySelector("#thread-subtitle"),
+  threadPinButton: document.querySelector("#thread-pin-button"),
   connectionBadge: document.querySelector("#connection-badge"),
   statusBanner: document.querySelector("#status-banner"),
   statusBannerTitle: document.querySelector("#status-banner-title"),
@@ -70,9 +74,13 @@ const elements = {
   messageList: document.querySelector("#message-list"),
   composerForm: document.querySelector("#composer-form"),
   composerInput: document.querySelector("#composer-input"),
+  modelButton: document.querySelector("#model-button"),
+  modelMenu: document.querySelector("#model-menu"),
+  modelSummary: document.querySelector("#model-summary"),
+  accessModeButton: document.querySelector("#access-mode-button"),
+  accessModeMenu: document.querySelector("#access-mode-menu"),
   accessModeSummary: document.querySelector("#access-mode-summary"),
-  projectPathSummary: document.querySelector("#project-path-summary"),
-  refreshThreadButton: document.querySelector("#refresh-thread-button"),
+  accessModeOptions: document.querySelectorAll("[data-access-mode]"),
   loadDefaultPairing: document.querySelector("#load-default-pairing"),
   connectButton: document.querySelector("#connect-button"),
   disconnectButton: document.querySelector("#disconnect-button"),
@@ -121,11 +129,16 @@ function bindEvents() {
     renderThreads();
   });
   elements.newThreadButton.addEventListener("click", createThreadAndSelect);
-  elements.refreshThreadButton.addEventListener("click", refreshActiveThread);
   elements.homePrimaryButton.addEventListener("click", handleHomePrimaryAction);
   elements.homeSecondaryButton.addEventListener("click", handleHomeSecondaryAction);
   elements.statusBannerAction.addEventListener("click", handleBannerAction);
   elements.composerForm.addEventListener("submit", sendMessage);
+  elements.modelButton.addEventListener("click", toggleModelMenu);
+  elements.threadPinButton.addEventListener("click", toggleActiveThreadPin);
+  elements.accessModeButton.addEventListener("click", toggleAccessModeMenu);
+  elements.accessModeOptions.forEach((button) => {
+    button.addEventListener("click", handleAccessModeOptionSelect);
+  });
   elements.loadDefaultPairing.addEventListener("click", loadDefaultPairing);
   elements.connectButton.addEventListener("click", connectBridge);
   elements.disconnectButton.addEventListener("click", disconnectBridge);
@@ -136,10 +149,14 @@ function bindEvents() {
   elements.approveButton.addEventListener("click", () => respondToApproval("accept"));
   elements.declineButton.addEventListener("click", () => respondToApproval("decline"));
   window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeComposerMenus();
+    }
     if (event.key === "Escape" && state.sidebarOpen) {
       closeSidebar();
     }
   });
+  document.addEventListener("click", handleGlobalClick);
   window.addEventListener("resize", () => {
     renderCurrentView();
     renderSidebarShell();
@@ -179,6 +196,7 @@ async function enterAuthenticatedMode() {
   renderSidebarShell();
   await refreshStatus();
   await refreshSecurity();
+  await refreshRuntimeConfig();
   const pairingPayload = await loadDefaultPairing();
   if (!state.status?.isConnected) {
     const autoConnected = await maybeAutoConnect(pairingPayload);
@@ -186,6 +204,7 @@ async function enterAuthenticatedMode() {
     renderCurrentView();
   }
   if (state.status?.isConnected) {
+    await refreshRuntimeConfig();
     await refreshThreads();
   } else {
     renderThreads();
@@ -201,6 +220,9 @@ function leaveAuthenticatedMode(message = "") {
   state.security = null;
   state.appError = "";
   state.autoConnectAttempted = false;
+  state.availableModels = [];
+  state.selectedModelId = "";
+  state.pinnedThreadIds = [];
   state.threads = [];
   state.activeThreadId = "";
   state.activeThread = null;
@@ -307,10 +329,13 @@ function closeSidebar() {
 
 function setCurrentView(view) {
   state.currentView = view === "connection" ? "connection" : "chat";
+  closeComposerMenus();
   renderCurrentView();
   if (state.currentView !== "chat") {
     closeSidebar();
+    return;
   }
+  renderSidebarShell();
 }
 
 function renderCurrentView() {
@@ -400,6 +425,24 @@ async function refreshSecurity() {
   }
 }
 
+async function refreshRuntimeConfig() {
+  if (!state.authenticated) {
+    return;
+  }
+
+  try {
+    const response = await api("/api/runtime-config");
+    state.availableModels = response.models || [];
+    state.selectedModelId = response.preferences?.selectedModelId || "";
+    state.pinnedThreadIds = response.preferences?.pinnedThreadIds || [];
+    renderComposerMeta();
+    renderThreads();
+    renderThreadActions();
+  } catch (error) {
+    showAppError(error.message);
+  }
+}
+
 async function loadDefaultPairing(options = {}) {
   if (!state.authenticated) {
     return null;
@@ -464,6 +507,7 @@ async function connectBridgeWithPayload(pairingPayload) {
     });
     clearAppError();
     await refreshStatus();
+    await refreshRuntimeConfig();
     await refreshThreads();
     return true;
   } catch (error) {
@@ -489,6 +533,7 @@ async function disconnectBridge() {
     state.messages = [];
     renderMessages();
     await refreshStatus();
+    renderThreadActions();
   } catch (error) {
     showAppError(error.message);
   } finally {
@@ -507,15 +552,18 @@ async function refreshThreads() {
   try {
     const response = await api("/api/threads");
     state.threads = response.threads || [];
-    if (!state.activeThreadId && state.threads.length > 0) {
-      state.activeThreadId = state.threads[0].id;
+    const prioritizedThreads = prioritizeThreads(state.threads);
+    if (!state.activeThreadId && prioritizedThreads.length > 0) {
+      state.activeThreadId = prioritizedThreads[0].id;
     } else if (state.activeThreadId && !state.threads.some((thread) => thread.id === state.activeThreadId)) {
-      state.activeThreadId = state.threads[0]?.id || "";
+      state.activeThreadId = prioritizedThreads[0]?.id || "";
     }
     renderThreads();
     if (state.activeThreadId) {
       await refreshActiveThread();
     } else {
+      state.activeThread = null;
+      state.messages = [];
       renderMessages();
     }
   } catch (error) {
@@ -535,6 +583,7 @@ async function createThreadAndSelect() {
       body: {
         cwd: elements.projectPath.value,
         accessMode: elements.accessMode.value,
+        model: selectedModelRequestValue(),
       },
     });
     state.activeThreadId = response.thread.id;
@@ -589,6 +638,7 @@ async function sendMessage(event) {
         text,
         cwd: elements.projectPath.value,
         accessMode: elements.accessMode.value,
+        model: selectedModelRequestValue(),
       },
     });
     elements.composerInput.value = "";
@@ -712,7 +762,7 @@ function renderThreads() {
     if (!state.searchQuery) {
       return true;
     }
-    return [thread.title, thread.preview, thread.cwd]
+    return [thread.title, thread.preview, thread.cwd, thread.model]
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(state.searchQuery));
   });
@@ -748,7 +798,7 @@ function renderThreads() {
           <span class="thread-title-text">${escapeHTML(thread.title || "New Chat")}</span>
           <span class="thread-time">${escapeHTML(compactRelativeTime(thread.updatedAt || thread.createdAt))}</span>
         </div>
-        <span class="thread-subcopy">${escapeHTML(thread.preview || thread.cwd || thread.id)}</span>
+        <span class="thread-subcopy">${escapeHTML(describeThreadRow(thread))}</span>
       `;
       button.addEventListener("click", async () => {
         state.activeThreadId = thread.id;
@@ -770,8 +820,9 @@ function renderMessages() {
   const activeThread = state.activeThread;
   elements.threadTitle.textContent = activeThread?.title || "Remodex";
   elements.threadSubtitle.textContent = activeThread
-    ? activeThread.cwd || activeThread.id
+    ? describeActiveThreadSubtitle(activeThread)
     : "Choose a conversation or start a new chat.";
+  renderThreadActions();
 
   elements.homeState.hidden = Boolean(state.activeThreadId);
   elements.messageList.hidden = !state.activeThreadId;
@@ -892,10 +943,172 @@ function renderApproval() {
 }
 
 function renderComposerMeta() {
-  elements.accessModeSummary.textContent = elements.accessMode.value === "on-request"
+  const summary = elements.accessMode.value === "on-request"
     ? "On-Request"
     : "Full Access";
-  elements.projectPathSummary.textContent = elements.projectPath.value.trim() || "No project selected";
+  elements.accessModeSummary.textContent = summary;
+  elements.accessModeButton.setAttribute("aria-label", `Access mode: ${summary}`);
+  elements.accessModeOptions.forEach((button) => {
+    const selected = button.dataset.accessMode === elements.accessMode.value;
+    button.classList.toggle("selected", selected);
+    button.setAttribute("aria-pressed", selected ? "true" : "false");
+  });
+
+  const selectedModelLabel = activeModelDisplayName();
+  elements.modelSummary.textContent = selectedModelLabel;
+  elements.modelButton.setAttribute("aria-label", `Model: ${selectedModelLabel}`);
+  elements.modelButton.disabled = !state.availableModels.length && !state.selectedModelId;
+  renderModelMenu();
+}
+
+function renderModelMenu() {
+  elements.modelMenu.innerHTML = "";
+
+  const options = [
+    {
+      id: "",
+      displayName: defaultModelDisplayName(),
+      description: "Use the bridge default for new chats and turns.",
+      isDefault: true,
+    },
+    ...state.availableModels,
+  ];
+
+  for (const option of options) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `access-mode-option ${isSelectedModelOption(option.id) ? "selected" : ""}`;
+    button.innerHTML = `
+      <strong>${escapeHTML(option.displayName || option.model || option.id || "Auto")}</strong>
+      <span>${escapeHTML(describeModelOption(option))}</span>
+    `;
+    button.addEventListener("click", async () => {
+      await setSelectedModel(option.id);
+      setModelMenuOpen(false);
+    });
+    elements.modelMenu.appendChild(button);
+  }
+}
+
+function renderThreadActions() {
+  const hasActiveThread = Boolean(state.activeThreadId);
+  const isPinned = hasActiveThread && isPinnedThread(state.activeThreadId);
+  elements.threadPinButton.hidden = !hasActiveThread;
+  elements.threadPinButton.disabled = !hasActiveThread;
+  elements.threadPinButton.textContent = isPinned ? "Pinned" : "Pin";
+  elements.threadPinButton.classList.toggle("is-active", isPinned);
+}
+
+function isAccessModeMenuOpen() {
+  return Boolean(elements.accessModeMenu && !elements.accessModeMenu.hidden);
+}
+
+function setAccessModeMenuOpen(open) {
+  if (!elements.accessModeMenu || !elements.accessModeButton) {
+    return;
+  }
+  if (open) {
+    setModelMenuOpen(false);
+  }
+  elements.accessModeMenu.hidden = !open;
+  elements.accessModeButton.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function isModelMenuOpen() {
+  return Boolean(elements.modelMenu && !elements.modelMenu.hidden);
+}
+
+function setModelMenuOpen(open) {
+  if (!elements.modelMenu || !elements.modelButton) {
+    return;
+  }
+  if (open) {
+    setAccessModeMenuOpen(false);
+  }
+  elements.modelMenu.hidden = !open;
+  elements.modelButton.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function toggleAccessModeMenu(event) {
+  event.stopPropagation();
+  setAccessModeMenuOpen(!isAccessModeMenuOpen());
+}
+
+function toggleModelMenu(event) {
+  event.stopPropagation();
+  setModelMenuOpen(!isModelMenuOpen());
+}
+
+function handleAccessModeOptionSelect(event) {
+  const nextMode = event.currentTarget.dataset.accessMode;
+  if (!nextMode) {
+    return;
+  }
+  elements.accessMode.value = nextMode;
+  renderComposerMeta();
+  setAccessModeMenuOpen(false);
+}
+
+function closeComposerMenus() {
+  setAccessModeMenuOpen(false);
+  setModelMenuOpen(false);
+}
+
+function handleGlobalClick(event) {
+  if (!isAccessModeMenuOpen() && !isModelMenuOpen()) {
+    return;
+  }
+  const target = event.target;
+  if (!(target instanceof Node)) {
+    closeComposerMenus();
+    return;
+  }
+  if (elements.accessModeButton.contains(target)
+    || elements.accessModeMenu.contains(target)
+    || elements.modelButton.contains(target)
+    || elements.modelMenu.contains(target)) {
+    return;
+  }
+  closeComposerMenus();
+}
+
+async function toggleActiveThreadPin() {
+  if (!state.activeThreadId) {
+    return;
+  }
+
+  const nextPinnedThreadIDs = new Set(state.pinnedThreadIds);
+  if (nextPinnedThreadIDs.has(state.activeThreadId)) {
+    nextPinnedThreadIDs.delete(state.activeThreadId);
+  } else {
+    nextPinnedThreadIDs.add(state.activeThreadId);
+  }
+
+  await savePreferences({
+    pinnedThreadIds: [...nextPinnedThreadIDs],
+  });
+}
+
+async function setSelectedModel(modelId) {
+  await savePreferences({
+    selectedModelId: String(modelId || "").trim(),
+  });
+}
+
+async function savePreferences(nextPreferences) {
+  try {
+    const response = await api("/api/preferences", {
+      method: "PUT",
+      body: nextPreferences,
+    });
+    state.selectedModelId = response.preferences?.selectedModelId || "";
+    state.pinnedThreadIds = response.preferences?.pinnedThreadIds || [];
+    renderComposerMeta();
+    renderThreads();
+    renderThreadActions();
+  } catch (error) {
+    showAppError(error.message);
+  }
 }
 
 function handleHomePrimaryAction() {
@@ -1061,9 +1274,74 @@ function describeBan(ban) {
   return `${ban.message} Lift time: ${formatTimestamp(ban.banUntil)}.`;
 }
 
+function selectedModelRequestValue() {
+  const selectedModelId = String(state.selectedModelId || "").trim();
+  return selectedModelId || undefined;
+}
+
+function selectedModelOption() {
+  const selectedModelId = String(state.selectedModelId || "").trim();
+  if (!selectedModelId) {
+    return null;
+  }
+  return state.availableModels.find((model) => model.id === selectedModelId || model.model === selectedModelId) || null;
+}
+
+function defaultModelOption() {
+  return state.availableModels.find((model) => model.isDefault) || state.availableModels[0] || null;
+}
+
+function defaultModelDisplayName() {
+  const defaultModel = defaultModelOption();
+  if (!defaultModel) {
+    return "Auto";
+  }
+  return `Auto (${defaultModel.displayName})`;
+}
+
+function activeModelDisplayName() {
+  return selectedModelOption()?.displayName || state.selectedModelId || defaultModelDisplayName();
+}
+
+function describeModelOption(option) {
+  const detail = String(option.description || "").trim();
+  if (detail) {
+    return detail;
+  }
+  if (option.model && option.model !== option.displayName) {
+    return option.model;
+  }
+  return option.id ? `Identifier: ${option.id}` : "Use this model for new turns.";
+}
+
+function isSelectedModelOption(modelId) {
+  const selectedModelId = String(state.selectedModelId || "").trim();
+  return selectedModelId
+    ? selectedModelId === String(modelId || "").trim()
+    : !String(modelId || "").trim();
+}
+
+function isPinnedThread(threadId) {
+  return state.pinnedThreadIds.includes(threadId);
+}
+
+function prioritizeThreads(threads) {
+  return [...threads].sort((left, right) => {
+    const pinPriority = Number(isPinnedThread(right.id)) - Number(isPinnedThread(left.id));
+    if (pinPriority !== 0) {
+      return pinPriority;
+    }
+    return byRecentThread(left, right);
+  });
+}
+
 function groupThreads(threads) {
+  const pinnedThreads = prioritizeThreads(threads.filter((thread) => isPinnedThread(thread.id)));
   const groups = new Map();
   for (const thread of threads) {
+    if (isPinnedThread(thread.id)) {
+      continue;
+    }
     const cwd = String(thread.cwd || "").trim();
     const key = cwd || "__ungrouped__";
     const label = cwd ? baseName(cwd) : "Unscoped";
@@ -1077,7 +1355,7 @@ function groupThreads(threads) {
     groups.get(key).threads.push(thread);
   }
 
-  return [...groups.values()]
+  const projectGroups = [...groups.values()]
     .map((group) => ({
       ...group,
       threads: [...group.threads].sort(byRecentThread),
@@ -1087,10 +1365,52 @@ function groupThreads(threads) {
       const rightTime = decodeTime(right.threads[0]?.updatedAt || right.threads[0]?.createdAt);
       return rightTime - leftTime;
     });
+
+  if (!pinnedThreads.length) {
+    return projectGroups;
+  }
+
+  return [
+    {
+      key: "__pinned__",
+      label: "Pinned",
+      threads: pinnedThreads,
+    },
+    ...projectGroups,
+  ];
 }
 
 function byRecentThread(left, right) {
   return decodeTime(right.updatedAt || right.createdAt) - decodeTime(left.updatedAt || left.createdAt);
+}
+
+function describeThreadRow(thread) {
+  const parts = [];
+  if (thread.model) {
+    parts.push(thread.model);
+  }
+  if (thread.preview) {
+    parts.push(thread.preview);
+  } else if (thread.cwd) {
+    parts.push(thread.cwd);
+  } else {
+    parts.push(thread.id);
+  }
+  return parts.filter(Boolean).join(" · ");
+}
+
+function describeActiveThreadSubtitle(thread) {
+  const parts = [];
+  if (thread.cwd) {
+    parts.push(thread.cwd);
+  }
+  if (thread.model) {
+    parts.push(thread.model);
+  }
+  if (!parts.length && thread.id) {
+    parts.push(thread.id);
+  }
+  return parts.join(" · ");
 }
 
 function connectionPhase() {

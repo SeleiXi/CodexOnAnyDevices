@@ -1,11 +1,11 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Remodex</title>
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="/styles.css">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <div class="ambient ambient-a"></div>
@@ -26,15 +26,24 @@
           <span>Persistent admin session with IP rate limiting</span>
         </div>
 
-        <p id="auth-status" class="support-copy">Enter the admin password to access Remodex Web.</p>
+        <p id="auth-status" class="support-copy">
+          Enter the admin password to access Remodex Web.
+        </p>
         <p id="auth-error" class="inline-error" hidden></p>
 
         <form id="login-form" class="auth-form">
           <label class="field">
             <span>Password</span>
-            <input id="password-input" type="password" autocomplete="current-password" placeholder="Admin password">
+            <input
+              id="password-input"
+              type="password"
+              autocomplete="current-password"
+              placeholder="Admin password"
+            />
           </label>
-          <button id="login-button" class="primary-button" type="submit">Sign In</button>
+          <button id="login-button" class="primary-button" type="submit">
+            Sign In
+          </button>
         </form>
       </div>
     </section>
@@ -50,13 +59,21 @@
         </div>
 
         <nav class="view-switcher" aria-label="Primary">
-          <button id="nav-chat-button" class="view-tab active" type="button">Chat</button>
-          <button id="nav-connection-button" class="view-tab" type="button">Connection</button>
+          <button id="nav-chat-button" class="view-tab active" type="button">
+            Chat
+          </button>
+          <button id="nav-connection-button" class="view-tab" type="button">
+            Connection
+          </button>
         </nav>
 
         <div class="topbar-meta">
-          <span id="connection-badge" class="status-capsule cold">Disconnected</span>
-          <button id="logout-button" class="ghost-button compact" type="button">Log Out</button>
+          <span id="connection-badge" class="status-capsule cold"
+            >Disconnected</span
+          >
+          <button id="logout-button" class="ghost-button compact" type="button">
+            Log Out
+          </button>
         </div>
       </header>
 
@@ -71,7 +88,12 @@
               </div>
             </div>
 
-            <button id="toggle-sidebar-button" class="floating-button mobile-only" type="button" aria-label="Close chat list">
+            <button
+              id="toggle-sidebar-button"
+              class="floating-button mobile-only"
+              type="button"
+              aria-label="Close chat list"
+            >
               <span>Close</span>
             </button>
           </div>
@@ -79,13 +101,22 @@
           <div class="sidebar-tools">
             <label class="search-shell">
               <span class="search-icon">/</span>
-              <input id="thread-search-input" type="text" placeholder="Search conversations">
+              <input
+                id="thread-search-input"
+                type="text"
+                placeholder="Search conversations"
+              />
             </label>
 
-            <button id="new-thread-button" class="new-chat-button" type="button">
+            <button
+              id="new-thread-button"
+              class="new-chat-button"
+              type="button"
+            >
               <span class="new-chat-icon">+</span>
               <span>New Chat</span>
             </button>
+
           </div>
 
           <div id="thread-list" class="thread-list"></div>
@@ -108,15 +139,38 @@
         <main class="stage">
           <header class="stage-header">
             <div class="stage-header-main">
-              <button id="open-sidebar-button" class="toolbar-button compact mobile-only" type="button" aria-label="Open chat list">Menu</button>
+              <button
+                id="open-sidebar-button"
+                class="toolbar-button compact mobile-only"
+                type="button"
+                aria-label="Open chat list"
+              >
+                Menu
+              </button>
               <div class="stage-heading">
                 <h1 id="thread-title">Remodex</h1>
-                <p id="thread-subtitle" class="support-copy">Choose a conversation or start a new chat.</p>
+                <p id="thread-subtitle" class="support-copy">
+                  Choose a conversation or start a new chat.
+                </p>
               </div>
             </div>
 
             <div class="stage-actions">
-              <button id="open-settings-inline" class="toolbar-button compact" type="button">Connection</button>
+              <button
+                id="thread-pin-button"
+                class="toolbar-button compact"
+                type="button"
+                hidden
+              >
+                Pin
+              </button>
+              <button
+                id="open-settings-inline"
+                class="toolbar-button compact"
+                type="button"
+              >
+                Connection
+              </button>
             </div>
           </header>
 
@@ -125,7 +179,13 @@
               <p id="status-banner-title" class="banner-title"></p>
               <p id="status-banner-copy" class="banner-copy"></p>
             </div>
-            <button id="status-banner-action" class="ghost-button compact" type="button">Open</button>
+            <button
+              id="status-banner-action"
+              class="ghost-button compact"
+              type="button"
+            >
+              Open
+            </button>
           </section>
 
           <div class="message-pane">
@@ -142,7 +202,9 @@
               <div id="trusted-pair-card" class="trusted-card" hidden>
                 <div class="trusted-icon">OK</div>
                 <div>
-                  <p id="trusted-pair-title" class="micro-label muted">Saved Mac</p>
+                  <p id="trusted-pair-title" class="micro-label muted">
+                    Saved Mac
+                  </p>
                   <strong id="trusted-pair-name">No pairing yet</strong>
                   <p id="trusted-pair-detail" class="support-copy"></p>
                 </div>
@@ -152,8 +214,20 @@
               <p id="home-message" class="support-copy"></p>
 
               <div class="home-actions">
-                <button id="home-primary-button" class="primary-button" type="button">Connect to Bridge</button>
-                <button id="home-secondary-button" class="ghost-button" type="button">Load Local JSON</button>
+                <button
+                  id="home-primary-button"
+                  class="primary-button"
+                  type="button"
+                >
+                  Connect to Bridge
+                </button>
+                <button
+                  id="home-secondary-button"
+                  class="ghost-button"
+                  type="button"
+                >
+                  Load Local JSON
+                </button>
               </div>
             </section>
 
@@ -162,28 +236,74 @@
 
           <form id="composer-form" class="composer-stack">
             <div class="composer-card glass-panel">
-              <textarea id="composer-input" rows="4" placeholder="Ask anything... @files, $skills, /commands"></textarea>
+              <textarea
+                id="composer-input"
+                rows="3"
+                placeholder="Ask anything..."
+              ></textarea>
 
               <div class="composer-bar">
                 <div class="composer-hint">
                   Messages route through the current Remodex bridge session.
                 </div>
-                <button id="send-button" class="primary-button" type="submit">Send</button>
+                <button id="send-button" class="primary-button" type="submit">
+                  Send
+                </button>
               </div>
             </div>
 
             <div class="composer-secondary">
-              <div class="meta-pill">
-                <span>Access</span>
-                <strong id="access-mode-summary">Full Access</strong>
+              <div class="composer-model-control">
+                <button
+                  id="model-button"
+                  class="ghost-button compact access-mode-button model-button"
+                  type="button"
+                  aria-haspopup="true"
+                  aria-expanded="false"
+                >
+                  <strong id="model-summary">Auto</strong>
+                  <span
+                    class="access-mode-button__chevron"
+                    aria-hidden="true"
+                  ></span>
+                </button>
+
+                <div id="model-menu" class="access-mode-menu glass-panel" hidden></div>
               </div>
 
-              <div class="meta-pill">
-                <span>Project</span>
-                <strong id="project-path-summary">No project selected</strong>
-              </div>
+              <div class="composer-access-control">
+                <button
+                  id="access-mode-button"
+                  class="ghost-button compact access-mode-button"
+                  type="button"
+                  aria-haspopup="true"
+                  aria-expanded="false"
+                >
+                  <strong id="access-mode-summary">Full Access</strong>
+                  <span class="access-mode-button__chevron" aria-hidden="true"></span>
+                </button>
 
-              <button id="refresh-thread-button" class="ghost-button compact" type="button">Refresh</button>
+                <div
+                  id="access-mode-menu"
+                  class="access-mode-menu glass-panel"
+                  hidden
+                >
+                  <button
+                    class="access-mode-option"
+                    type="button"
+                    data-access-mode="full-access"
+                  >
+                    Full Access
+                  </button>
+                  <button
+                    class="access-mode-option"
+                    type="button"
+                    data-access-mode="on-request"
+                  >
+                    On-Request
+                  </button>
+                </div>
+              </div>
             </div>
           </form>
         </main>
@@ -196,27 +316,50 @@
               <p class="micro-label">Bridge Control</p>
               <h2>Connection & Security</h2>
             </div>
-            <button id="connection-back-button" class="toolbar-button compact mobile-only" type="button">Back to Chat</button>
+            <button
+              id="connection-back-button"
+              class="toolbar-button compact mobile-only"
+              type="button"
+            >
+              Back to Chat
+            </button>
           </header>
 
           <div class="settings-block">
             <div class="metric-card">
               <span class="micro-label muted">State</span>
               <strong id="connection-status">Disconnected</strong>
-              <p id="connection-detail" class="support-copy">Load a pairing payload to connect.</p>
+              <p id="connection-detail" class="support-copy">
+                Load a pairing payload to connect.
+              </p>
             </div>
 
             <div class="settings-actions">
-              <button id="load-default-pairing" class="ghost-button" type="button">Load Local JSON</button>
-              <button id="connect-button" class="primary-button" type="button">Connect</button>
-              <button id="disconnect-button" class="ghost-button" type="button">Disconnect</button>
+              <button
+                id="load-default-pairing"
+                class="ghost-button"
+                type="button"
+              >
+                Load Local JSON
+              </button>
+              <button id="connect-button" class="primary-button" type="button">
+                Connect
+              </button>
+              <button id="disconnect-button" class="ghost-button" type="button">
+                Disconnect
+              </button>
             </div>
           </div>
 
           <div class="settings-block">
             <label class="field">
               <span>Pairing JSON</span>
-              <textarea id="pairing-json" spellcheck="false" rows="8" placeholder='{"relay":"ws://...","sessionId":"..."}'></textarea>
+              <textarea
+                id="pairing-json"
+                spellcheck="false"
+                rows="8"
+                placeholder='{"relay":"ws://...","sessionId":"..."}'
+              ></textarea>
             </label>
 
             <div class="settings-grid">
@@ -230,7 +373,11 @@
 
               <label class="field">
                 <span>Project Path</span>
-                <input id="project-path" type="text" placeholder="/root/coding/project">
+                <input
+                  id="project-path"
+                  type="text"
+                  placeholder="/root/coding/project"
+                />
               </label>
             </div>
 
@@ -246,32 +393,56 @@
             <div class="metric-card">
               <span class="micro-label muted">Current Request</span>
               <strong id="current-ip-label">Unknown</strong>
-              <p id="proxy-mode-label" class="support-copy">Direct origin access.</p>
+              <p id="proxy-mode-label" class="support-copy">
+                Direct origin access.
+              </p>
             </div>
 
             <label class="toggle-row">
               <span>Enable IP allowlist</span>
-              <input id="allowlist-enabled" type="checkbox">
+              <input id="allowlist-enabled" type="checkbox" />
             </label>
 
             <label class="toggle-row">
               <span>Trust Cloudflare proxy headers</span>
-              <input id="trust-proxy-headers" type="checkbox">
+              <input id="trust-proxy-headers" type="checkbox" />
             </label>
 
             <label class="field">
               <span>Allowed IPs / CIDRs</span>
-              <textarea id="allowed-cidrs" spellcheck="false" rows="5" placeholder="127.0.0.1&#10;203.0.113.8&#10;198.51.100.0/24"></textarea>
+              <textarea
+                id="allowed-cidrs"
+                spellcheck="false"
+                rows="5"
+                placeholder="127.0.0.1&#10;203.0.113.8&#10;198.51.100.0/24"
+              ></textarea>
             </label>
 
             <label class="field">
               <span>Trusted proxy CIDRs</span>
-              <textarea id="trusted-proxy-cidrs" spellcheck="false" rows="5" placeholder="Cloudflare edge ranges"></textarea>
+              <textarea
+                id="trusted-proxy-cidrs"
+                spellcheck="false"
+                rows="5"
+                placeholder="Cloudflare edge ranges"
+              ></textarea>
             </label>
 
             <div class="settings-actions two-up">
-              <button id="save-security-button" class="primary-button" type="button">Save Policy</button>
-              <button id="use-cloudflare-button" class="ghost-button" type="button">Use Cloudflare Defaults</button>
+              <button
+                id="save-security-button"
+                class="primary-button"
+                type="button"
+              >
+                Save Policy
+              </button>
+              <button
+                id="use-cloudflare-button"
+                class="ghost-button"
+                type="button"
+              >
+                Use Cloudflare Defaults
+              </button>
             </div>
           </section>
 
@@ -282,8 +453,12 @@
             </div>
             <pre id="approval-text"></pre>
             <div class="settings-actions two-up">
-              <button id="approve-button" class="primary-button" type="button">Approve</button>
-              <button id="decline-button" class="ghost-button" type="button">Decline</button>
+              <button id="approve-button" class="primary-button" type="button">
+                Approve
+              </button>
+              <button id="decline-button" class="ghost-button" type="button">
+                Decline
+              </button>
             </div>
           </section>
         </main>

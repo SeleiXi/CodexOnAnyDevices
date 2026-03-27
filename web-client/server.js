@@ -28,6 +28,7 @@ const STATE_DIR = path.join(ROOT_DIR, "state");
 const AUTH_STATE_FILE = path.join(STATE_DIR, "auth-state.json");
 const SECURITY_STATE_FILE = path.join(STATE_DIR, "security-state.json");
 const PHONE_IDENTITY_FILE = path.join(STATE_DIR, "phone-identity.json");
+const UI_PREFERENCES_FILE = path.join(STATE_DIR, "ui-preferences.json");
 const DEFAULT_PAIRING_FILE = path.join(REPO_DIR, "remodex-pairing.json");
 const HTTP_PORT = Number.parseInt(process.env.PORT || "8787", 10);
 const PREFER_LOCAL_RELAY = process.env.REMODEX_WEB_PREFER_LOCAL_RELAY !== "false";
@@ -56,6 +57,7 @@ class RemodexWebClient {
     this.isConnected = false;
     this.isInitialized = false;
     this.lastDisconnect = null;
+    this.cachedModels = [];
   }
 
   status() {
@@ -346,10 +348,26 @@ class RemodexWebClient {
     return items.map(decodeThreadSummary).filter(Boolean);
   }
 
-  async createThread({ cwd = "", accessMode = "full-access" } = {}) {
+  async listModels(limit = 50) {
+    const response = await this.sendRequest("model/list", {
+      cursor: null,
+      limit,
+      includeHidden: false,
+    });
+    const result = response.result || {};
+    const items = result.data || result.items || result.models || [];
+    const models = items.map(decodeModelOption).filter(Boolean);
+    this.cachedModels = models;
+    return models;
+  }
+
+  async createThread({ cwd = "", accessMode = "full-access", model = "" } = {}) {
     const params = {};
     if (cwd.trim()) {
       params.cwd = cwd.trim();
+    }
+    if (String(model || "").trim()) {
+      params.model = String(model).trim();
     }
     const response = await this.sendRequestWithSandboxFallback("thread/start", params, accessMode);
     const thread = response.result?.thread;
@@ -359,12 +377,15 @@ class RemodexWebClient {
     return decodeThreadSummary(thread);
   }
 
-  async resumeThread(threadId, { cwd = "", accessMode = "full-access" } = {}) {
+  async resumeThread(threadId, { cwd = "", accessMode = "full-access", model = "" } = {}) {
     const params = {
       threadId,
     };
     if (cwd.trim()) {
       params.cwd = cwd.trim();
+    }
+    if (String(model || "").trim()) {
+      params.model = String(model).trim();
     }
     try {
       return await this.sendRequestWithSandboxFallback("thread/resume", params, accessMode);
@@ -376,27 +397,28 @@ class RemodexWebClient {
     }
   }
 
-  async startTurn(threadId, text, { accessMode = "full-access", cwd = "" } = {}) {
+  async startTurn(threadId, text, { accessMode = "full-access", cwd = "", model = "" } = {}) {
     const trimmed = String(text || "").trim();
     if (!trimmed) {
       throw new Error("Message cannot be empty");
     }
 
-    await this.resumeThread(threadId, { cwd, accessMode });
+    await this.resumeThread(threadId, { cwd, accessMode, model });
 
-    const response = await this.sendRequestWithSandboxFallback(
-      "turn/start",
-      {
-        threadId,
-        input: [
-          {
-            type: "text",
-            text: trimmed,
-          },
-        ],
-      },
-      accessMode
-    );
+    const params = {
+      threadId,
+      input: [
+        {
+          type: "text",
+          text: trimmed,
+        },
+      ],
+    };
+    if (String(model || "").trim()) {
+      params.model = String(model).trim();
+    }
+
+    const response = await this.sendRequestWithSandboxFallback("turn/start", params, accessMode);
     return response.result || {};
   }
 
@@ -867,6 +889,47 @@ async function handleApiRequest(req, res, url) {
     return;
   }
 
+  if (req.method === "GET" && url.pathname === "/api/runtime-config") {
+    let models = client.cachedModels;
+    if (client.status().isConnected) {
+      try {
+        models = await client.listModels();
+      } catch (error) {
+        if (!models.length) {
+          throw error;
+        }
+      }
+    }
+
+    writeJson(res, 200, {
+      ok: true,
+      models,
+      preferences: readUiPreferences(),
+      isConnected: client.status().isConnected,
+    });
+    return;
+  }
+
+  if (req.method === "PUT" && url.pathname === "/api/preferences") {
+    const body = await readJsonBody(req);
+    const currentPreferences = readUiPreferences();
+    const nextPreferences = {
+      ...currentPreferences,
+      ...(Object.prototype.hasOwnProperty.call(body, "selectedModelId")
+        ? { selectedModelId: body.selectedModelId }
+        : {}),
+      ...(Object.prototype.hasOwnProperty.call(body, "pinnedThreadIds")
+        ? { pinnedThreadIds: body.pinnedThreadIds }
+        : {}),
+    };
+
+    writeJson(res, 200, {
+      ok: true,
+      preferences: writeUiPreferences(nextPreferences),
+    });
+    return;
+  }
+
   if (req.method === "GET" && url.pathname === "/api/pairing/default") {
     const forceRefresh = url.searchParams.get("refresh") === "1";
     const existingPairing = readJsonFileSafe(DEFAULT_PAIRING_FILE);
@@ -1039,6 +1102,33 @@ function readJsonFileSafe(filePath) {
   } catch {
     return null;
   }
+}
+
+function readUiPreferences() {
+  return normalizeUiPreferences(readJsonFileSafe(UI_PREFERENCES_FILE));
+}
+
+function writeUiPreferences(nextPreferences) {
+  const normalized = normalizeUiPreferences(nextPreferences);
+  fs.writeFileSync(UI_PREFERENCES_FILE, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
+  return normalized;
+}
+
+function normalizeUiPreferences(value) {
+  const objectValue = value && typeof value === "object" ? value : {};
+  const pinnedThreadIds = Array.from(
+    new Set(
+      (Array.isArray(objectValue.pinnedThreadIds) ? objectValue.pinnedThreadIds : [])
+        .map((threadId) => String(threadId || "").trim())
+        .filter(Boolean)
+    )
+  );
+  const selectedModelId = String(objectValue.selectedModelId || "").trim();
+
+  return {
+    pinnedThreadIds,
+    selectedModelId,
+  };
 }
 
 function requestIsSecure(req) {
@@ -1253,6 +1343,26 @@ function decodeThreadSummary(threadObject) {
     updatedAt: threadObject.updatedAt || threadObject.updated_at || null,
     createdAt: threadObject.createdAt || threadObject.created_at || null,
     model: stringOrEmpty(threadObject.model),
+  };
+}
+
+function decodeModelOption(modelObject) {
+  if (!modelObject || typeof modelObject !== "object") {
+    return null;
+  }
+
+  const model = stringOrEmpty(modelObject.model) || stringOrEmpty(modelObject.id);
+  const id = stringOrEmpty(modelObject.id) || model;
+  if (!id) {
+    return null;
+  }
+
+  return {
+    id,
+    model,
+    displayName: stringOrEmpty(modelObject.displayName || modelObject.display_name) || model || id,
+    description: stringOrEmpty(modelObject.description),
+    isDefault: Boolean(modelObject.isDefault ?? modelObject.is_default),
   };
 }
 

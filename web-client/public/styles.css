@@ -315,6 +315,13 @@ select:focus {
   color: var(--text);
 }
 
+.toolbar-button.is-active,
+.ghost-button.is-active {
+  background: rgba(15, 23, 32, 0.12);
+  border-color: rgba(15, 23, 32, 0.12);
+  font-weight: 600;
+}
+
 .compact {
   min-height: 40px;
   padding: 10px 14px;
@@ -942,27 +949,27 @@ button:disabled {
 .composer-stack {
   flex: 0 0 auto;
   display: grid;
-  gap: 10px;
+  gap: 6px;
   position: relative;
   z-index: 5;
-  padding-top: 12px;
+  padding-top: 8px;
   background: var(--composer-fade);
 }
 
 .composer-card {
-  padding: 14px 14px 12px;
-  border-radius: 28px;
+  padding: 12px 12px 10px;
+  border-radius: 24px;
   background: rgba(255, 255, 255, 0.9);
   border: 1px solid rgba(15, 23, 32, 0.06);
   box-shadow: 0 18px 36px rgba(15, 23, 32, 0.08);
 }
 
 .composer-card textarea {
-  min-height: 78px;
-  max-height: 28dvh;
+  min-height: 64px;
+  max-height: 22dvh;
   border: 0;
   background: transparent;
-  padding: 8px 6px 12px;
+  padding: 6px 4px 8px;
   font-size: 1rem;
   line-height: 1.55;
   resize: none;
@@ -983,29 +990,94 @@ button:disabled {
 }
 
 .composer-secondary {
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 6px;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
   overflow: visible;
-  padding-bottom: 2px;
+  padding-bottom: 0;
 }
 
-.meta-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 38px;
+.composer-model-control,
+.composer-access-control {
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+
+.access-mode-button {
+  min-height: 36px;
   padding: 8px 12px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.76);
   border: 1px solid rgba(15, 23, 32, 0.06);
-  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 8px 18px rgba(15, 23, 32, 0.05);
 }
 
-.meta-pill strong {
-  max-width: min(45vw, 18rem);
-  overflow: hidden;
-  text-overflow: ellipsis;
+.model-button {
+  min-width: 132px;
+  justify-content: space-between;
+}
+
+.access-mode-button strong {
   font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.access-mode-button__chevron {
+  width: 8px;
+  height: 8px;
+  margin-top: -2px;
+  border-right: 1.5px solid var(--muted-strong);
+  border-bottom: 1.5px solid var(--muted-strong);
+  transform: rotate(45deg);
+  transition: transform 140ms ease;
+}
+
+.access-mode-button[aria-expanded="true"] .access-mode-button__chevron {
+  margin-top: 2px;
+  transform: rotate(225deg);
+}
+
+.access-mode-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  display: grid;
+  gap: 4px;
+  min-width: 172px;
+  padding: 8px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(15, 23, 32, 0.08);
+  box-shadow: 0 18px 36px rgba(15, 23, 32, 0.12);
+  backdrop-filter: blur(22px);
+  z-index: 15;
+}
+
+.access-mode-option {
+  display: grid;
+  gap: 4px;
+  min-height: 40px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font-size: 0.84rem;
+}
+
+.access-mode-option strong {
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.access-mode-option span {
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+.access-mode-option.selected {
+  background: rgba(15, 23, 32, 0.08);
   font-weight: 600;
 }
 
@@ -1119,18 +1191,14 @@ button:disabled {
   }
 
   .composer-secondary {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     overflow: visible;
     padding-bottom: 0;
   }
 
   .composer-secondary > * {
-    flex: 1 1 calc(50% - 6px);
+    flex: 0 0 auto;
     min-width: 0;
-  }
-
-  .meta-pill strong {
-    max-width: 100%;
   }
 
   .message-card,
@@ -1215,7 +1283,7 @@ button:disabled {
   }
 
   .composer-card textarea {
-    min-height: 54px;
+    min-height: 48px;
     max-height: 18dvh;
     padding: 4px 4px 8px;
     font-size: 0.92rem;
@@ -1230,17 +1298,13 @@ button:disabled {
     gap: 6px;
   }
 
-  .meta-pill {
+  .access-mode-button {
     min-height: 34px;
     padding: 6px 10px;
   }
 
-  .meta-pill strong {
+  .access-mode-button strong {
     font-size: 0.78rem;
-  }
-
-  .composer-secondary > button {
-    flex-basis: 100%;
   }
 }
 
@@ -1363,19 +1427,15 @@ button:disabled {
   }
 
   .composer-card textarea {
-    min-height: 92px;
-    max-height: 30dvh;
-    padding: 10px 8px 12px;
+    min-height: 72px;
+    max-height: 24dvh;
+    padding: 8px 6px 10px;
     font-size: 0.95rem;
   }
 
   .composer-secondary {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     overflow: visible;
-  }
-
-  .meta-pill strong {
-    max-width: 22rem;
   }
 
   .connection-stage {
