@@ -17,6 +17,8 @@ const state = {
   activeThreadId: "",
   activeThread: null,
   messages: [],
+  lastRenderedThreadId: "",
+  forceScrollToBottom: false,
   statusPoller: null,
   threadPoller: null,
   messagePoller: null,
@@ -200,6 +202,8 @@ function leaveAuthenticatedMode(message = "") {
   state.activeThreadId = "";
   state.activeThread = null;
   state.messages = [];
+  state.lastRenderedThreadId = "";
+  state.forceScrollToBottom = false;
   state.currentView = "chat";
   state.sidebarOpen = false;
   document.body.classList.remove("sidebar-open");
@@ -567,6 +571,7 @@ async function sendMessage(event) {
       },
     });
     elements.composerInput.value = "";
+    state.forceScrollToBottom = true;
     await refreshActiveThread();
     await refreshThreads();
   } catch (error) {
@@ -737,6 +742,10 @@ function renderThreads() {
 }
 
 function renderMessages() {
+  const previousDistanceFromBottom = distanceFromBottom(elements.messageList);
+  const shouldStickToBottom = state.forceScrollToBottom
+    || state.activeThreadId !== state.lastRenderedThreadId
+    || isNearBottom(elements.messageList);
   const activeThread = state.activeThread;
   elements.threadTitle.textContent = activeThread?.title || "Remodex";
   elements.threadSubtitle.textContent = activeThread
@@ -749,6 +758,8 @@ function renderMessages() {
   if (!state.activeThreadId) {
     renderHomeState();
     elements.messageList.innerHTML = "";
+    state.lastRenderedThreadId = "";
+    state.forceScrollToBottom = false;
     return;
   }
 
@@ -762,6 +773,8 @@ function renderMessages() {
       <p class="support-copy">Your composer stays anchored at the bottom, like the native client.</p>
     `;
     elements.messageList.appendChild(empty);
+    state.lastRenderedThreadId = state.activeThreadId;
+    state.forceScrollToBottom = false;
     return;
   }
 
@@ -779,7 +792,16 @@ function renderMessages() {
   }
 
   window.requestAnimationFrame(() => {
-    elements.messageList.scrollTop = elements.messageList.scrollHeight;
+    if (shouldStickToBottom) {
+      elements.messageList.scrollTop = elements.messageList.scrollHeight;
+    } else {
+      elements.messageList.scrollTop = Math.max(
+        0,
+        elements.messageList.scrollHeight - elements.messageList.clientHeight - previousDistanceFromBottom,
+      );
+    }
+    state.lastRenderedThreadId = state.activeThreadId;
+    state.forceScrollToBottom = false;
   });
 }
 
@@ -923,6 +945,17 @@ function showAppError(message) {
   elements.appError.textContent = message;
   renderBanner();
   renderHomeState();
+}
+
+function distanceFromBottom(element) {
+  if (!element) {
+    return 0;
+  }
+  return Math.max(0, element.scrollHeight - element.scrollTop - element.clientHeight);
+}
+
+function isNearBottom(element, threshold = 96) {
+  return distanceFromBottom(element) <= threshold;
 }
 
 function clearAppError() {

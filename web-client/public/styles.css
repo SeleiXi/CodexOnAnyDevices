@@ -57,8 +57,8 @@
   --radius-sm: 14px;
   --shell-pad: 12px;
   --sidebar-width: 320px;
-  --message-max-width: 50rem;
-  --message-user-max-width: 42rem;
+  --message-max-width: 44rem;
+  --message-user-max-width: 38rem;
   --composer-fade: linear-gradient(180deg, rgba(241, 243, 246, 0) 0%, rgba(241, 243, 246, 0.88) 24%, rgba(241, 243, 246, 0.98) 100%);
   --font-sans:
     "Geist",
@@ -613,6 +613,10 @@ button:disabled {
   font-size: 0.96rem;
   font-weight: 600;
   line-height: 1.3;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .thread-time {
@@ -624,6 +628,10 @@ button:disabled {
   font-size: 0.74rem;
   line-height: 1.45;
   word-break: break-word;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .thread-empty {
@@ -672,8 +680,8 @@ button:disabled {
 }
 
 .stage {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
   min-height: 0;
   height: 100%;
@@ -697,6 +705,7 @@ button:disabled {
 }
 
 .stage-header {
+  flex: 0 0 auto;
   justify-content: space-between;
   gap: 12px;
   padding: 12px 14px;
@@ -724,18 +733,28 @@ button:disabled {
 }
 
 .stage-heading h1 {
-  font-size: clamp(1.2rem, 4vw, 1.9rem);
-  line-height: 1.02;
+  margin: 0;
+  max-width: min(100%, 44rem);
+  font-size: clamp(1.18rem, 2.6vw, 1.7rem);
+  line-height: 1.04;
+  letter-spacing: -0.04em;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .stage-heading .support-copy {
   margin: 6px 0 0;
   font-size: 0.82rem;
   line-height: 1.45;
-  word-break: break-word;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .status-banner {
+  flex: 0 0 auto;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -765,8 +784,10 @@ button:disabled {
   justify-items: center;
   align-content: center;
   gap: 18px;
+  flex: 1 1 auto;
   min-height: 0;
   width: 100%;
+  min-height: 100%;
   padding: 28px 20px;
   text-align: center;
   border-radius: 30px;
@@ -789,8 +810,12 @@ button:disabled {
 }
 
 .message-pane {
+  flex: 1 1 auto;
   min-height: 0;
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-top: 2px;
 }
 
 .trusted-card {
@@ -820,18 +845,23 @@ button:disabled {
 }
 
 .message-list {
+  flex: 1 1 auto;
   overflow: auto;
   min-height: 0;
   display: grid;
   align-content: start;
   justify-items: start;
-  gap: 12px;
-  padding: 4px 2px 8px 0;
+  gap: 14px;
+  padding: 6px 4px 26px 0;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .message-card {
   width: min(100%, var(--message-max-width));
   max-width: min(100%, var(--message-max-width));
+  display: grid;
+  gap: 8px;
   padding: 14px 15px;
   border-radius: 22px;
   background: rgba(255, 255, 255, 0.84);
@@ -866,7 +896,6 @@ button:disabled {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 10px;
   font-size: 0.75rem;
   text-transform: uppercase;
 }
@@ -884,7 +913,7 @@ button:disabled {
 .message-card pre {
   font-family: var(--font-sans);
   max-width: 100%;
-  overflow-x: auto;
+  overflow-x: hidden;
 }
 
 .approval-card pre {
@@ -897,31 +926,36 @@ button:disabled {
 }
 
 .composer-stack {
+  flex: 0 0 auto;
   display: grid;
   gap: 10px;
-  position: sticky;
-  bottom: 0;
+  position: relative;
   z-index: 5;
   padding-top: 12px;
   background: var(--composer-fade);
 }
 
 .composer-card {
-  padding: 12px;
-  border-radius: 26px;
+  padding: 14px 14px 12px;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(15, 23, 32, 0.06);
+  box-shadow: 0 18px 36px rgba(15, 23, 32, 0.08);
 }
 
 .composer-card textarea {
-  min-height: 86px;
+  min-height: 78px;
   max-height: 28dvh;
   border: 0;
   background: transparent;
   padding: 8px 6px 12px;
   font-size: 1rem;
   line-height: 1.55;
+  resize: none;
 }
 
 .composer-bar {
+  margin-top: 2px;
   align-items: flex-end;
   justify-content: space-between;
   gap: 12px;
@@ -936,8 +970,8 @@ button:disabled {
 
 .composer-secondary {
   gap: 8px;
-  flex-wrap: nowrap;
-  overflow-x: auto;
+  flex-wrap: wrap;
+  overflow: visible;
   padding-bottom: 2px;
 }
 
@@ -948,7 +982,7 @@ button:disabled {
   min-height: 38px;
   padding: 8px 12px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.64);
+  background: rgba(255, 255, 255, 0.76);
   border: 1px solid rgba(15, 23, 32, 0.06);
   white-space: nowrap;
 }
@@ -1037,12 +1071,14 @@ button:disabled {
   }
 
   .stage {
-    padding: 10px;
-    border-radius: 30px;
+    gap: 10px;
+    padding: 12px;
+    border-radius: 32px;
   }
 
   .stage-header {
     padding: 10px 12px;
+    border-radius: 26px;
   }
 
   .stage-actions {
@@ -1055,14 +1091,17 @@ button:disabled {
     font-size: 0.84rem;
   }
 
-  .status-banner,
-  .composer-bar {
+  .status-banner {
     flex-direction: column;
     align-items: stretch;
   }
 
   .composer-hint {
     display: none;
+  }
+
+  .composer-bar {
+    justify-content: flex-end;
   }
 
   .composer-secondary {
@@ -1072,7 +1111,7 @@ button:disabled {
   }
 
   .composer-secondary > * {
-    flex: 1 1 calc(50% - 4px);
+    flex: 1 1 calc(50% - 6px);
     min-width: 0;
   }
 
@@ -1111,12 +1150,39 @@ button:disabled {
 }
 
 @media (max-width: 640px) {
+  .stage-header {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .stage-header-main {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+  }
+
+  .stage-actions {
+    margin-left: auto;
+  }
+
+  .stage-actions .toolbar-button,
+  #open-sidebar-button {
+    min-height: 40px;
+    padding: 0 12px;
+    font-size: 0.78rem;
+  }
+
   .stage-heading h1 {
-    font-size: 1.12rem;
+    font-size: 1rem;
+    -webkit-line-clamp: 1;
   }
 
   .stage-heading .support-copy {
-    font-size: 0.76rem;
+    margin-top: 4px;
+    font-size: 0.72rem;
   }
 
   .message-card {
@@ -1124,16 +1190,43 @@ button:disabled {
     border-radius: 20px;
   }
 
+  .composer-stack {
+    gap: 6px;
+    padding-top: 6px;
+  }
+
   .composer-card {
-    padding: 10px;
+    padding: 10px 10px 8px;
     border-radius: 22px;
   }
 
   .composer-card textarea {
-    min-height: 74px;
-    max-height: 24dvh;
-    padding: 6px 4px 10px;
-    font-size: 0.95rem;
+    min-height: 54px;
+    max-height: 18dvh;
+    padding: 4px 4px 8px;
+    font-size: 0.92rem;
+  }
+
+  .composer-bar .primary-button {
+    min-height: 38px;
+    padding: 9px 14px;
+  }
+
+  .composer-secondary {
+    gap: 6px;
+  }
+
+  .meta-pill {
+    min-height: 34px;
+    padding: 6px 10px;
+  }
+
+  .meta-pill strong {
+    font-size: 0.78rem;
+  }
+
+  .composer-secondary > button {
+    flex-basis: 100%;
   }
 }
 
@@ -1211,7 +1304,7 @@ button:disabled {
 
   .stage {
     gap: 16px;
-    padding: 18px 18px 14px;
+    padding: 20px 22px 18px;
     border-radius: 34px;
     background: rgba(255, 255, 255, 0.58);
     border: 1px solid rgba(15, 23, 32, 0.06);
@@ -1225,7 +1318,7 @@ button:disabled {
   }
 
   .stage-header {
-    padding: 0;
+    padding: 0 2px 2px;
     border: 0;
     background: transparent;
     box-shadow: none;
@@ -1239,11 +1332,11 @@ button:disabled {
   }
 
   .stage-heading h1 {
-    font-size: clamp(1.75rem, 3vw, 2.35rem);
+    font-size: clamp(1.4rem, 2vw, 1.9rem);
   }
 
   .message-list {
-    padding-right: 4px;
+    padding-right: 8px;
   }
 
   .message-card {
@@ -1256,8 +1349,8 @@ button:disabled {
   }
 
   .composer-card textarea {
-    min-height: 112px;
-    max-height: 34dvh;
+    min-height: 92px;
+    max-height: 30dvh;
     padding: 10px 8px 12px;
     font-size: 0.95rem;
   }
