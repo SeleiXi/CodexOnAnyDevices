@@ -550,6 +550,20 @@ button:disabled {
   background: rgba(15, 23, 32, 0.08);
 }
 
+.sidebar-menu-button {
+  width: 100%;
+  justify-content: flex-start;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  background: rgba(15, 23, 32, 0.05);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.sidebar-menu-button:hover {
+  background: rgba(15, 23, 32, 0.08);
+}
+
 .new-chat-icon {
   display: grid;
   place-items: center;
