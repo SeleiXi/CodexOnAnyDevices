@@ -14,6 +14,7 @@ const state = {
   isDisconnecting: false,
   availableModels: [],
   selectedModelId: "",
+  pinnedThreadIds: [],
   threads: [],
   searchQuery: "",
   activeThreadId: "",
@@ -219,6 +220,7 @@ function leaveAuthenticatedMode(message = "") {
   state.autoConnectAttempted = false;
   state.availableModels = [];
   state.selectedModelId = "";
+  state.pinnedThreadIds = [];
   state.threads = [];
   state.activeThreadId = "";
   state.activeThread = null;
@@ -431,10 +433,18 @@ async function refreshRuntimeConfig() {
     state.availableModels = response.models || [];
     state.selectedModelId = response.preferences?.selectedModelId || "";
     renderComposerMeta();
-    renderThreads();
   } catch (error) {
     showAppError(error.message);
   }
+
+  try {
+    const response = await api("/api/pinned-threads");
+    state.pinnedThreadIds = response.threadIds || [];
+  } catch (error) {
+    showAppError(error.message);
+  }
+
+  renderThreads();
 }
 
 async function loadDefaultPairing(options = {}) {
@@ -783,6 +793,9 @@ function renderThreads() {
     section.appendChild(heading);
 
     for (const thread of group.threads) {
+      const row = document.createElement("div");
+      row.className = `thread-row-shell ${thread.id === state.activeThreadId ? "selected" : ""}`;
+
       const button = document.createElement("button");
       button.type = "button";
       button.className = `thread-row ${thread.id === state.activeThreadId ? "selected" : ""}`;
@@ -793,14 +806,6 @@ function renderThreads() {
         </div>
         <div class="thread-row-footer">
           <span class="thread-subcopy">${escapeHTML(describeThreadRow(thread))}</span>
-          <button
-            type="button"
-            class="thread-pin-indicator ${thread.pinned ? "is-pinned" : ""}"
-            aria-label="${thread.pinned ? "Pinned in Codex" : "Not pinned in Codex"}"
-            title="${thread.pinned ? "Pinned in Codex" : "Not pinned in Codex"}"
-            tabindex="-1"
-            disabled
-          >📌</button>
         </div>
       `;
       button.addEventListener("click", async () => {
@@ -808,7 +813,21 @@ function renderThreads() {
         closeSidebar();
         await refreshActiveThread();
       });
-      section.appendChild(button);
+
+      const pinButton = document.createElement("button");
+      pinButton.type = "button";
+      pinButton.className = `thread-pin-indicator ${thread.pinned ? "is-pinned" : ""}`;
+      pinButton.setAttribute("aria-label", thread.pinned ? "Unpin thread" : "Pin thread");
+      pinButton.setAttribute("title", thread.pinned ? "Unpin thread" : "Pin thread");
+      pinButton.textContent = "📌";
+      pinButton.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        await toggleThreadPin(thread.id);
+      });
+
+      row.appendChild(button);
+      row.appendChild(pinButton);
+      section.appendChild(row);
     }
 
     elements.threadList.appendChild(section);
@@ -1071,6 +1090,33 @@ async function setSelectedModel(modelId) {
   });
 }
 
+async function toggleThreadPin(threadId) {
+  const nextPinnedThreadIDs = new Set(state.pinnedThreadIds);
+  if (nextPinnedThreadIDs.has(threadId)) {
+    nextPinnedThreadIDs.delete(threadId);
+  } else {
+    nextPinnedThreadIDs.add(threadId);
+  }
+
+  try {
+    const response = await api("/api/pinned-threads", {
+      method: "PUT",
+      body: {
+        threadIds: [...nextPinnedThreadIDs],
+      },
+    });
+    state.pinnedThreadIds = response.threadIds || [];
+    state.threads = state.threads.map((thread) => (
+      thread.id === threadId
+        ? { ...thread, pinned: state.pinnedThreadIds.includes(thread.id) }
+        : { ...thread, pinned: state.pinnedThreadIds.includes(thread.id) }
+    ));
+    renderThreads();
+  } catch (error) {
+    showAppError(error.message);
+  }
+}
+
 async function savePreferences(nextPreferences) {
   try {
     const response = await api("/api/preferences", {
@@ -1297,7 +1343,7 @@ function isSelectedModelOption(modelId) {
 
 function prioritizeThreads(threads) {
   return [...threads].sort((left, right) => {
-    const pinPriority = Number(Boolean(right.pinned)) - Number(Boolean(left.pinned));
+    const pinPriority = Number(isPinnedThread(right.id, right)) - Number(isPinnedThread(left.id, left));
     if (pinPriority !== 0) {
       return pinPriority;
     }
@@ -1306,10 +1352,10 @@ function prioritizeThreads(threads) {
 }
 
 function groupThreads(threads) {
-  const pinnedThreads = prioritizeThreads(threads.filter((thread) => thread.pinned));
+  const pinnedThreads = prioritizeThreads(threads.filter((thread) => isPinnedThread(thread.id, thread)));
   const groups = new Map();
   for (const thread of threads) {
-    if (thread.pinned) {
+    if (isPinnedThread(thread.id, thread)) {
       continue;
     }
     const cwd = String(thread.cwd || "").trim();
@@ -1367,6 +1413,13 @@ function describeThreadRow(thread) {
     parts.push(thread.id);
   }
   return parts.filter(Boolean).join(" · ");
+}
+
+function isPinnedThread(threadId, thread = null) {
+  if (state.pinnedThreadIds.includes(threadId)) {
+    return true;
+  }
+  return Boolean(thread?.pinned);
 }
 
 function describeActiveThreadSubtitle(thread) {

@@ -1,5 +1,6 @@
 const fs = require("fs");
 const http = require("http");
+const os = require("os");
 const path = require("path");
 const { URL } = require("url");
 const {
@@ -42,6 +43,8 @@ const SECURE_SENDER_MAC = "mac";
 const THREAD_LIST_SOURCE_KINDS = ["cli", "vscode", "appServer", "exec", "unknown"];
 const CONTROL_MESSAGE_TIMEOUT_MS = 15_000;
 const MAX_BODY_BYTES = 1024 * 1024;
+const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+const CODEX_GLOBAL_STATE_FILE = path.join(CODEX_HOME, ".codex-global-state.json");
 
 class RemodexWebClient {
   constructor() {
@@ -345,7 +348,10 @@ class RemodexWebClient {
     });
     const result = response.result || {};
     const items = result.data || result.items || result.threads || [];
-    return items.map(decodeThreadSummary).filter(Boolean);
+    const pinnedThreadIDs = new Set(readPinnedThreadIds());
+    return items
+      .map((threadObject) => decodeThreadSummary(threadObject, pinnedThreadIDs))
+      .filter(Boolean);
   }
 
   async listModels(limit = 50) {
@@ -927,6 +933,23 @@ async function handleApiRequest(req, res, url) {
     return;
   }
 
+  if (req.method === "GET" && url.pathname === "/api/pinned-threads") {
+    writeJson(res, 200, {
+      ok: true,
+      threadIds: readPinnedThreadIds(),
+    });
+    return;
+  }
+
+  if (req.method === "PUT" && url.pathname === "/api/pinned-threads") {
+    const body = await readJsonBody(req);
+    writeJson(res, 200, {
+      ok: true,
+      threadIds: writePinnedThreadIds(body.threadIds),
+    });
+    return;
+  }
+
   if (req.method === "GET" && url.pathname === "/api/pairing/default") {
     const forceRefresh = url.searchParams.get("refresh") === "1";
     const existingPairing = readJsonFileSafe(DEFAULT_PAIRING_FILE);
@@ -1111,6 +1134,22 @@ function writeUiPreferences(nextPreferences) {
   return normalized;
 }
 
+function readPinnedThreadIds() {
+  const payload = readJsonFileSafe(CODEX_GLOBAL_STATE_FILE);
+  const state = payload && typeof payload === "object" ? payload : {};
+  return normalizeStringArray(state["pinned-thread-ids"]);
+}
+
+function writePinnedThreadIds(threadIds) {
+  const normalizedThreadIDs = normalizeStringArray(threadIds);
+  const payload = readJsonFileSafe(CODEX_GLOBAL_STATE_FILE);
+  const nextState = payload && typeof payload === "object" ? payload : {};
+  nextState["pinned-thread-ids"] = normalizedThreadIDs;
+  fs.mkdirSync(path.dirname(CODEX_GLOBAL_STATE_FILE), { recursive: true });
+  fs.writeFileSync(CODEX_GLOBAL_STATE_FILE, `${JSON.stringify(nextState)}\n`, "utf8");
+  return normalizedThreadIDs;
+}
+
 function normalizeUiPreferences(value) {
   const objectValue = value && typeof value === "object" ? value : {};
   const selectedModelId = String(objectValue.selectedModelId || "").trim();
@@ -1118,6 +1157,16 @@ function normalizeUiPreferences(value) {
   return {
     selectedModelId,
   };
+}
+
+function normalizeStringArray(value) {
+  return Array.from(
+    new Set(
+      (Array.isArray(value) ? value : [])
+        .map((entry) => String(entry || "").trim())
+        .filter(Boolean)
+    )
+  );
 }
 
 function requestIsSecure(req) {
@@ -1314,7 +1363,7 @@ function openWebSocket(url, options) {
   });
 }
 
-function decodeThreadSummary(threadObject) {
+function decodeThreadSummary(threadObject, pinnedThreadIDs = null) {
   if (!threadObject || typeof threadObject !== "object") {
     return null;
   }
@@ -1332,7 +1381,9 @@ function decodeThreadSummary(threadObject) {
     updatedAt: threadObject.updatedAt || threadObject.updated_at || null,
     createdAt: threadObject.createdAt || threadObject.created_at || null,
     model: stringOrEmpty(threadObject.model),
-    pinned: decodePinnedThreadState(threadObject),
+    pinned: pinnedThreadIDs instanceof Set
+      ? pinnedThreadIDs.has(stringOrEmpty(threadObject.id))
+      : decodePinnedThreadState(threadObject),
   };
 }
 
