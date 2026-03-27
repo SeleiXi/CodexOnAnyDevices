@@ -56,6 +56,10 @@
   --radius-md: 18px;
   --radius-sm: 14px;
   --shell-pad: 12px;
+  --sidebar-width: 320px;
+  --message-max-width: 50rem;
+  --message-user-max-width: 42rem;
+  --composer-fade: linear-gradient(180deg, rgba(241, 243, 246, 0) 0%, rgba(241, 243, 246, 0.88) 24%, rgba(241, 243, 246, 0.98) 100%);
   --font-sans:
     "Geist",
     -apple-system,
@@ -448,6 +452,7 @@ button:disabled {
 
 #chat-page.page-shell {
   position: relative;
+  min-height: 0;
 }
 
 .sidebar-scrim {
@@ -469,24 +474,26 @@ button:disabled {
   position: fixed;
   inset:
     calc(env(safe-area-inset-top, 0px) + 10px)
-    calc(env(safe-area-inset-right, 0px) + 10px)
+    auto
     calc(env(safe-area-inset-bottom, 0px) + 10px)
     calc(env(safe-area-inset-left, 0px) + 10px);
   z-index: 30;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 14px;
+  width: min(var(--sidebar-width), calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
   padding: 16px;
   border-radius: 30px;
   background: var(--panel-elevated);
   border: 1px solid rgba(15, 23, 32, 0.06);
   box-shadow: var(--shadow);
-  transform: translateY(calc(100% + 24px));
+  transform: translateX(calc(-100% - 18px));
   transition: transform 180ms ease;
 }
 
 .app-shell.sidebar-open .sidebar {
-  transform: translateY(0);
+  transform: translateX(0);
 }
 
 .sidebar-header {
@@ -653,18 +660,29 @@ button:disabled {
 .floating-button {
   display: inline-grid;
   place-items: center;
-  width: 42px;
-  height: 42px;
+  min-width: 42px;
+  min-height: 42px;
+  padding: 0 14px;
   border-radius: 999px;
   background: rgba(15, 23, 32, 0.06);
   color: var(--text);
   box-shadow: none;
+  font-size: 0.78rem;
+  font-weight: 600;
 }
 
 .stage {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 12px;
+  min-height: 0;
+  height: 100%;
+  padding: 14px;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.56);
+  border: 1px solid rgba(15, 23, 32, 0.06);
+  box-shadow: var(--shadow-soft);
+  overflow: hidden;
 }
 
 .stage-header,
@@ -679,28 +697,41 @@ button:disabled {
 }
 
 .stage-header {
-  flex-direction: column;
-  align-items: stretch;
+  justify-content: space-between;
   gap: 12px;
-  padding: 14px;
-  border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.74);
+  padding: 12px 14px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.78);
   border: 1px solid rgba(15, 23, 32, 0.06);
-  box-shadow: var(--shadow-soft);
+  box-shadow: 0 10px 24px rgba(15, 23, 32, 0.06);
+}
+
+.stage-header-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.stage-heading {
+  min-width: 0;
 }
 
 .stage-actions {
-  justify-content: space-between;
+  justify-content: flex-end;
   flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
 .stage-heading h1 {
-  font-size: clamp(1.65rem, 8vw, 2.35rem);
-  line-height: 0.98;
+  font-size: clamp(1.2rem, 4vw, 1.9rem);
+  line-height: 1.02;
 }
 
 .stage-heading .support-copy {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
   word-break: break-word;
 }
 
@@ -735,6 +766,7 @@ button:disabled {
   align-content: center;
   gap: 18px;
   min-height: 0;
+  width: 100%;
   padding: 28px 20px;
   text-align: center;
   border-radius: 30px;
@@ -754,6 +786,11 @@ button:disabled {
   background: rgba(255, 255, 255, 0.68);
   border: 1px solid rgba(15, 23, 32, 0.06);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.62);
+}
+
+.message-pane {
+  min-height: 0;
+  display: grid;
 }
 
 .trusted-card {
@@ -785,25 +822,33 @@ button:disabled {
 .message-list {
   overflow: auto;
   min-height: 0;
-  padding-right: 2px;
-  padding-bottom: 6px;
+  display: grid;
+  align-content: start;
+  justify-items: start;
+  gap: 12px;
+  padding: 4px 2px 8px 0;
 }
 
 .message-card {
-  max-width: 100%;
-  margin-bottom: 12px;
+  width: min(100%, var(--message-max-width));
+  max-width: min(100%, var(--message-max-width));
   padding: 14px 15px;
   border-radius: 22px;
   background: rgba(255, 255, 255, 0.84);
   border: 1px solid rgba(15, 23, 32, 0.06);
   box-shadow: var(--shadow-soft);
+  overflow: hidden;
 }
 
 .message-card.role-user {
-  margin-left: auto;
-  width: min(100%, 44rem);
+  justify-self: end;
+  width: min(100%, var(--message-user-max-width));
   background: rgba(15, 23, 32, 0.94);
   color: white;
+}
+
+.message-card.role-assistant {
+  justify-self: start;
 }
 
 .message-card.role-user .message-head {
@@ -811,9 +856,9 @@ button:disabled {
 }
 
 .message-card.role-system {
-  margin-left: auto;
-  margin-right: auto;
-  max-width: 540px;
+  justify-self: center;
+  width: min(100%, 34rem);
+  max-width: min(100%, 34rem);
   background: rgba(15, 23, 32, 0.06);
 }
 
@@ -830,6 +875,7 @@ button:disabled {
 .approval-card pre {
   margin: 0;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: break-word;
   font-size: 0.94rem;
   line-height: 1.62;
@@ -837,6 +883,8 @@ button:disabled {
 
 .message-card pre {
   font-family: var(--font-sans);
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .approval-card pre {
@@ -851,6 +899,11 @@ button:disabled {
 .composer-stack {
   display: grid;
   gap: 10px;
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  padding-top: 12px;
+  background: var(--composer-fade);
 }
 
 .composer-card {
@@ -859,8 +912,8 @@ button:disabled {
 }
 
 .composer-card textarea {
-  min-height: 104px;
-  max-height: 30dvh;
+  min-height: 86px;
+  max-height: 28dvh;
   border: 0;
   background: transparent;
   padding: 8px 6px 12px;
@@ -914,6 +967,7 @@ button:disabled {
 
 .connection-stage {
   width: 100%;
+  min-height: 100%;
   margin: 0 auto;
   padding: 18px;
   border-radius: 30px;
@@ -967,26 +1021,38 @@ button:disabled {
   accent-color: #111827;
 }
 
-@media (max-width: 640px) {
+@media (max-width: 980px) {
+  .app-shell {
+    grid-template-rows: minmax(0, 1fr);
+    gap: 0;
+    padding:
+      calc(env(safe-area-inset-top, 0px) + 10px)
+      calc(env(safe-area-inset-right, 0px) + 10px)
+      calc(env(safe-area-inset-bottom, 0px) + 10px)
+      calc(env(safe-area-inset-left, 0px) + 10px);
+  }
+
   .app-topbar {
-    grid-template-columns: 1fr;
+    display: none;
   }
 
-  .topbar-meta {
-    justify-content: space-between;
-    gap: 8px;
+  .stage {
+    padding: 10px;
+    border-radius: 30px;
   }
 
-  .topbar-meta .status-capsule {
-    max-width: 9rem;
-    overflow: hidden;
-    justify-content: center;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .stage-header {
+    padding: 10px 12px;
   }
 
-  .topbar-meta .ghost-button {
-    padding-inline: 12px;
+  .stage-actions {
+    flex: 0 0 auto;
+  }
+
+  .stage-actions .toolbar-button {
+    min-height: 38px;
+    padding: 9px 12px;
+    font-size: 0.84rem;
   }
 
   .status-banner,
@@ -995,8 +1061,34 @@ button:disabled {
     align-items: stretch;
   }
 
-  .stage-actions > * {
-    flex: 1 1 calc(50% - 6px);
+  .composer-hint {
+    display: none;
+  }
+
+  .composer-secondary {
+    flex-wrap: wrap;
+    overflow: visible;
+    padding-bottom: 0;
+  }
+
+  .composer-secondary > * {
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
+  }
+
+  .meta-pill strong {
+    max-width: 100%;
+  }
+
+  .message-card,
+  .message-card.role-user,
+  .message-card.role-system {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .message-head {
+    flex-wrap: wrap;
   }
 
   .home-actions,
@@ -1009,8 +1101,39 @@ button:disabled {
     width: 100%;
   }
 
+  .settings-header {
+    justify-content: space-between;
+  }
+
   .sidebar-footer {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .stage-heading h1 {
+    font-size: 1.12rem;
+  }
+
+  .stage-heading .support-copy {
+    font-size: 0.76rem;
+  }
+
+  .message-card {
+    padding: 13px 14px;
+    border-radius: 20px;
+  }
+
+  .composer-card {
+    padding: 10px;
+    border-radius: 22px;
+  }
+
+  .composer-card textarea {
+    min-height: 74px;
+    max-height: 24dvh;
+    padding: 6px 4px 10px;
+    font-size: 0.95rem;
   }
 }
 
@@ -1050,7 +1173,7 @@ button:disabled {
 
   #chat-page.page-shell {
     display: grid;
-    grid-template-columns: 320px minmax(0, 1fr);
+    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
     gap: 18px;
     align-items: stretch;
   }
@@ -1062,6 +1185,8 @@ button:disabled {
   .sidebar {
     position: static;
     inset: auto;
+    width: auto;
+    max-width: none;
     transform: none;
     gap: 12px;
     padding: 14px;
@@ -1095,9 +1220,11 @@ button:disabled {
 
   .stage-header,
   .settings-header {
-    flex-direction: row;
     align-items: center;
     justify-content: space-between;
+  }
+
+  .stage-header {
     padding: 0;
     border: 0;
     background: transparent;
@@ -1112,7 +1239,7 @@ button:disabled {
   }
 
   .stage-heading h1 {
-    font-size: clamp(2rem, 3.8vw, 2.8rem);
+    font-size: clamp(1.75rem, 3vw, 2.35rem);
   }
 
   .message-list {
@@ -1120,8 +1247,6 @@ button:disabled {
   }
 
   .message-card {
-    max-width: min(820px, 100%);
-    margin-bottom: 16px;
     padding: 16px 18px;
   }
 

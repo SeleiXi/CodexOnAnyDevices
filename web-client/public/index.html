@@ -72,13 +72,13 @@
             </div>
 
             <button id="toggle-sidebar-button" class="floating-button mobile-only" type="button" aria-label="Close chat list">
-              <span>✕</span>
+              <span>Close</span>
             </button>
           </div>
 
           <div class="sidebar-tools">
             <label class="search-shell">
-              <span class="search-icon">⌕</span>
+              <span class="search-icon">/</span>
               <input id="thread-search-input" type="text" placeholder="Search conversations">
             </label>
 
@@ -107,15 +107,16 @@
 
         <main class="stage">
           <header class="stage-header">
-            <div class="stage-heading">
-              <p class="micro-label">Conversation</p>
-              <h1 id="thread-title">Remodex</h1>
-              <p id="thread-subtitle" class="support-copy">Choose a conversation or start a new chat.</p>
+            <div class="stage-header-main">
+              <button id="open-sidebar-button" class="toolbar-button compact mobile-only" type="button" aria-label="Open chat list">Menu</button>
+              <div class="stage-heading">
+                <h1 id="thread-title">Remodex</h1>
+                <p id="thread-subtitle" class="support-copy">Choose a conversation or start a new chat.</p>
+              </div>
             </div>
 
             <div class="stage-actions">
-              <button id="open-sidebar-button" class="toolbar-button mobile-only" type="button">Chats</button>
-              <button id="open-settings-inline" class="toolbar-button" type="button">Connection</button>
+              <button id="open-settings-inline" class="toolbar-button compact" type="button">Connection</button>
             </div>
           </header>
 
@@ -127,35 +128,37 @@
             <button id="status-banner-action" class="ghost-button compact" type="button">Open</button>
           </section>
 
-          <section id="home-state" class="home-state" hidden>
-            <div class="home-logo-shell">
-              <div class="brand-tile home">R</div>
-            </div>
-
-            <div id="home-status-pill" class="status-capsule">
-              <span id="home-status-dot" class="status-dot muted"></span>
-              <span id="home-status-label">Offline</span>
-            </div>
-
-            <div id="trusted-pair-card" class="trusted-card" hidden>
-              <div class="trusted-icon">⌘</div>
-              <div>
-                <p id="trusted-pair-title" class="micro-label muted">Saved Mac</p>
-                <strong id="trusted-pair-name">No pairing yet</strong>
-                <p id="trusted-pair-detail" class="support-copy"></p>
+          <div class="message-pane">
+            <section id="home-state" class="home-state" hidden>
+              <div class="home-logo-shell">
+                <div class="brand-tile home">R</div>
               </div>
-            </div>
 
-            <p id="home-security-label" class="support-copy"></p>
-            <p id="home-message" class="support-copy"></p>
+              <div id="home-status-pill" class="status-capsule">
+                <span id="home-status-dot" class="status-dot muted"></span>
+                <span id="home-status-label">Offline</span>
+              </div>
 
-            <div class="home-actions">
-              <button id="home-primary-button" class="primary-button" type="button">Connect to Bridge</button>
-              <button id="home-secondary-button" class="ghost-button" type="button">Load Local JSON</button>
-            </div>
-          </section>
+              <div id="trusted-pair-card" class="trusted-card" hidden>
+                <div class="trusted-icon">OK</div>
+                <div>
+                  <p id="trusted-pair-title" class="micro-label muted">Saved Mac</p>
+                  <strong id="trusted-pair-name">No pairing yet</strong>
+                  <p id="trusted-pair-detail" class="support-copy"></p>
+                </div>
+              </div>
 
-          <div id="message-list" class="message-list"></div>
+              <p id="home-security-label" class="support-copy"></p>
+              <p id="home-message" class="support-copy"></p>
+
+              <div class="home-actions">
+                <button id="home-primary-button" class="primary-button" type="button">Connect to Bridge</button>
+                <button id="home-secondary-button" class="ghost-button" type="button">Load Local JSON</button>
+              </div>
+            </section>
+
+            <div id="message-list" class="message-list"></div>
+          </div>
 
           <form id="composer-form" class="composer-stack">
             <div class="composer-card glass-panel">
@@ -189,10 +192,11 @@
       <section id="connection-page" class="page-shell connection-page" hidden>
         <main class="connection-stage glass-panel">
           <header class="settings-header">
-            <div>
+            <div class="settings-heading">
               <p class="micro-label">Bridge Control</p>
               <h2>Connection & Security</h2>
             </div>
+            <button id="connection-back-button" class="toolbar-button compact mobile-only" type="button">Back to Chat</button>
           </header>
 
           <div class="settings-block">

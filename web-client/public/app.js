@@ -9,6 +9,7 @@ const state = {
   autoConnectAttempted: false,
   currentView: "chat",
   sidebarOpen: false,
+  lastCompactLayout: window.innerWidth <= 980,
   isConnecting: false,
   isDisconnecting: false,
   threads: [],
@@ -37,6 +38,7 @@ const elements = {
   toggleSidebarButton: document.querySelector("#toggle-sidebar-button"),
   sidebarScrim: document.querySelector("#sidebar-scrim"),
   openSettingsInline: document.querySelector("#open-settings-inline"),
+  connectionBackButton: document.querySelector("#connection-back-button"),
   sessionExpiryLabel: document.querySelector("#session-expiry-label"),
   pairedMacLabel: document.querySelector("#paired-mac-label"),
   pairedMacName: document.querySelector("#paired-mac-name"),
@@ -108,6 +110,7 @@ function bindEvents() {
   elements.toggleSidebarButton.addEventListener("click", toggleSidebar);
   elements.sidebarScrim.addEventListener("click", closeSidebar);
   elements.openSettingsInline.addEventListener("click", () => setCurrentView("connection"));
+  elements.connectionBackButton.addEventListener("click", () => setCurrentView("chat"));
   elements.threadSearchInput.addEventListener("input", () => {
     state.searchQuery = elements.threadSearchInput.value.trim().toLowerCase();
     renderThreads();
@@ -132,7 +135,10 @@ function bindEvents() {
       closeSidebar();
     }
   });
-  window.addEventListener("resize", renderSidebarShell);
+  window.addEventListener("resize", () => {
+    renderCurrentView();
+    renderSidebarShell();
+  });
 }
 
 async function refreshAuthSession() {
@@ -307,18 +313,28 @@ function renderCurrentView() {
   elements.appShell.dataset.view = state.currentView;
   elements.navChatButton.classList.toggle("active", onChat);
   elements.navConnectionButton.classList.toggle("active", !onChat);
+  elements.openSettingsInline.textContent = isCompactLayout() ? "Settings" : "Connection";
 }
 
 function renderSidebarShell() {
   const compact = isCompactLayout();
+  const sidebarCanOpen = compact && state.currentView === "chat";
+  if (compact !== state.lastCompactLayout) {
+    state.lastCompactLayout = compact;
+    if (compact) {
+      state.sidebarOpen = false;
+    }
+  }
   if (!compact) {
     state.sidebarOpen = true;
+  } else if (!sidebarCanOpen) {
+    state.sidebarOpen = false;
   }
   elements.appShell.classList.toggle("compact-layout", compact);
-  elements.appShell.classList.toggle("sidebar-open", compact && state.sidebarOpen);
-  document.body.classList.toggle("sidebar-open", compact && state.sidebarOpen);
-  elements.sidebarScrim.hidden = !(compact && state.sidebarOpen);
-  elements.openSidebarButton.hidden = !compact;
+  elements.appShell.classList.toggle("sidebar-open", sidebarCanOpen && state.sidebarOpen);
+  document.body.classList.toggle("sidebar-open", sidebarCanOpen && state.sidebarOpen);
+  elements.sidebarScrim.hidden = !(sidebarCanOpen && state.sidebarOpen);
+  elements.openSidebarButton.hidden = !sidebarCanOpen;
   elements.toggleSidebarButton.setAttribute("aria-label", state.sidebarOpen ? "Close chat list" : "Open chat list");
 }
 
@@ -762,7 +778,9 @@ function renderMessages() {
     elements.messageList.appendChild(article);
   }
 
-  elements.messageList.scrollTop = elements.messageList.scrollHeight;
+  window.requestAnimationFrame(() => {
+    elements.messageList.scrollTop = elements.messageList.scrollHeight;
+  });
 }
 
 function renderHomeState() {
