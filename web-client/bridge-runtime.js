@@ -368,8 +368,9 @@ function checkRelayHealth(port, host) {
 
 function readLogSinceOffset(filePath, offset) {
   try {
-    const content = fs.readFileSync(filePath, "utf8");
-    return content.slice(offset);
+    const content = fs.readFileSync(filePath);
+    const start = Math.max(0, Math.min(Number(offset) || 0, content.length));
+    return content.subarray(start).toString("utf8");
   } catch {
     return "";
   }
