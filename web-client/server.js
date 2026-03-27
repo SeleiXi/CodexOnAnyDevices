@@ -489,6 +489,7 @@ class RemodexWebClient {
 
   async sendRequest(method, params) {
     const requestId = randomUUID();
+    let pendingRecord = null;
     const responsePromise = new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(requestId);
@@ -496,19 +497,28 @@ class RemodexWebClient {
       }, 30_000);
       timeout.unref?.();
 
-      this.pendingRequests.set(requestId, {
+      pendingRecord = {
         resolve,
         reject,
         timeout,
         method,
-      });
+      };
+      this.pendingRequests.set(requestId, pendingRecord);
     });
 
-    await this.sendMessage({
-      id: requestId,
-      method,
-      params,
-    });
+    try {
+      await this.sendMessage({
+        id: requestId,
+        method,
+        params,
+      });
+    } catch (error) {
+      if (pendingRecord) {
+        clearTimeout(pendingRecord.timeout);
+      }
+      this.pendingRequests.delete(requestId);
+      throw error;
+    }
 
     return responsePromise;
   }
