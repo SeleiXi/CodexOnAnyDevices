@@ -14,6 +14,7 @@ const state = {
   isDisconnecting: false,
   availableModels: [],
   selectedModelId: "",
+  selectedReasoningEffort: "",
   pinnedThreadIds: [],
   threads: [],
   searchQuery: "",
@@ -76,6 +77,9 @@ const elements = {
   modelButton: document.querySelector("#model-button"),
   modelMenu: document.querySelector("#model-menu"),
   modelSummary: document.querySelector("#model-summary"),
+  reasoningButton: document.querySelector("#reasoning-button"),
+  reasoningMenu: document.querySelector("#reasoning-menu"),
+  reasoningSummary: document.querySelector("#reasoning-summary"),
   accessModeButton: document.querySelector("#access-mode-button"),
   accessModeMenu: document.querySelector("#access-mode-menu"),
   accessModeSummary: document.querySelector("#access-mode-summary"),
@@ -133,6 +137,7 @@ function bindEvents() {
   elements.statusBannerAction.addEventListener("click", handleBannerAction);
   elements.composerForm.addEventListener("submit", sendMessage);
   elements.modelButton.addEventListener("click", toggleModelMenu);
+  elements.reasoningButton.addEventListener("click", toggleReasoningMenu);
   elements.accessModeButton.addEventListener("click", toggleAccessModeMenu);
   elements.accessModeOptions.forEach((button) => {
     button.addEventListener("click", handleAccessModeOptionSelect);
@@ -220,6 +225,7 @@ function leaveAuthenticatedMode(message = "") {
   state.autoConnectAttempted = false;
   state.availableModels = [];
   state.selectedModelId = "";
+  state.selectedReasoningEffort = "";
   state.pinnedThreadIds = [];
   state.threads = [];
   state.activeThreadId = "";
@@ -432,6 +438,7 @@ async function refreshRuntimeConfig() {
     const response = await api("/api/runtime-config");
     state.availableModels = response.models || [];
     state.selectedModelId = response.preferences?.selectedModelId || "";
+    state.selectedReasoningEffort = response.preferences?.selectedReasoningEffort || "";
     renderComposerMeta();
   } catch (error) {
     showAppError(error.message);
@@ -642,6 +649,7 @@ async function sendMessage(event) {
         cwd: elements.projectPath.value,
         accessMode: elements.accessMode.value,
         model: selectedModelRequestValue(),
+        effort: selectedReasoningEffortRequestValue(),
       },
     });
     elements.composerInput.value = "";
@@ -980,6 +988,12 @@ function renderComposerMeta() {
   elements.modelButton.setAttribute("aria-label", `Model: ${selectedModelLabel}`);
   elements.modelButton.disabled = !state.availableModels.length && !state.selectedModelId;
   renderModelMenu();
+
+  const selectedReasoningLabel = activeReasoningDisplayTitle();
+  elements.reasoningSummary.textContent = selectedReasoningLabel;
+  elements.reasoningButton.setAttribute("aria-label", `Thinking level: ${selectedReasoningLabel}`);
+  elements.reasoningButton.disabled = supportedReasoningOptions().length === 0;
+  renderReasoningMenu();
 }
 
 function renderModelMenu() {
@@ -1011,6 +1025,34 @@ function renderModelMenu() {
   }
 }
 
+function renderReasoningMenu() {
+  elements.reasoningMenu.innerHTML = "";
+  const options = supportedReasoningOptions();
+
+  if (!options.length) {
+    const empty = document.createElement("div");
+    empty.className = "access-mode-option";
+    empty.textContent = "No thinking levels";
+    elements.reasoningMenu.appendChild(empty);
+    return;
+  }
+
+  for (const option of options) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `access-mode-option ${isSelectedReasoningEffort(option.reasoningEffort) ? "selected" : ""}`;
+    button.innerHTML = `
+      <strong>${escapeHTML(reasoningDisplayTitle(option.reasoningEffort))}</strong>
+      <span>${escapeHTML(option.description || "Thinking level for this model.")}</span>
+    `;
+    button.addEventListener("click", async () => {
+      await setSelectedReasoningEffort(option.reasoningEffort);
+      setReasoningMenuOpen(false);
+    });
+    elements.reasoningMenu.appendChild(button);
+  }
+}
+
 function isAccessModeMenuOpen() {
   return Boolean(elements.accessModeMenu && !elements.accessModeMenu.hidden);
 }
@@ -1021,6 +1063,7 @@ function setAccessModeMenuOpen(open) {
   }
   if (open) {
     setModelMenuOpen(false);
+    setReasoningMenuOpen(false);
   }
   elements.accessModeMenu.hidden = !open;
   elements.accessModeButton.setAttribute("aria-expanded", open ? "true" : "false");
@@ -1036,9 +1079,26 @@ function setModelMenuOpen(open) {
   }
   if (open) {
     setAccessModeMenuOpen(false);
+    setReasoningMenuOpen(false);
   }
   elements.modelMenu.hidden = !open;
   elements.modelButton.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function isReasoningMenuOpen() {
+  return Boolean(elements.reasoningMenu && !elements.reasoningMenu.hidden);
+}
+
+function setReasoningMenuOpen(open) {
+  if (!elements.reasoningMenu || !elements.reasoningButton) {
+    return;
+  }
+  if (open) {
+    setAccessModeMenuOpen(false);
+    setModelMenuOpen(false);
+  }
+  elements.reasoningMenu.hidden = !open;
+  elements.reasoningButton.setAttribute("aria-expanded", open ? "true" : "false");
 }
 
 function toggleAccessModeMenu(event) {
@@ -1049,6 +1109,11 @@ function toggleAccessModeMenu(event) {
 function toggleModelMenu(event) {
   event.stopPropagation();
   setModelMenuOpen(!isModelMenuOpen());
+}
+
+function toggleReasoningMenu(event) {
+  event.stopPropagation();
+  setReasoningMenuOpen(!isReasoningMenuOpen());
 }
 
 function handleAccessModeOptionSelect(event) {
@@ -1064,10 +1129,11 @@ function handleAccessModeOptionSelect(event) {
 function closeComposerMenus() {
   setAccessModeMenuOpen(false);
   setModelMenuOpen(false);
+  setReasoningMenuOpen(false);
 }
 
 function handleGlobalClick(event) {
-  if (!isAccessModeMenuOpen() && !isModelMenuOpen()) {
+  if (!isAccessModeMenuOpen() && !isModelMenuOpen() && !isReasoningMenuOpen()) {
     return;
   }
   const target = event.target;
@@ -1078,7 +1144,9 @@ function handleGlobalClick(event) {
   if (elements.accessModeButton.contains(target)
     || elements.accessModeMenu.contains(target)
     || elements.modelButton.contains(target)
-    || elements.modelMenu.contains(target)) {
+    || elements.modelMenu.contains(target)
+    || elements.reasoningButton.contains(target)
+    || elements.reasoningMenu.contains(target)) {
     return;
   }
   closeComposerMenus();
@@ -1087,6 +1155,12 @@ function handleGlobalClick(event) {
 async function setSelectedModel(modelId) {
   await savePreferences({
     selectedModelId: String(modelId || "").trim(),
+  });
+}
+
+async function setSelectedReasoningEffort(reasoningEffort) {
+  await savePreferences({
+    selectedReasoningEffort: String(reasoningEffort || "").trim(),
   });
 }
 
@@ -1124,6 +1198,7 @@ async function savePreferences(nextPreferences) {
       body: nextPreferences,
     });
     state.selectedModelId = response.preferences?.selectedModelId || "";
+    state.selectedReasoningEffort = response.preferences?.selectedReasoningEffort || "";
     renderComposerMeta();
     renderThreads();
   } catch (error) {
@@ -1299,6 +1374,11 @@ function selectedModelRequestValue() {
   return selectedModelId || undefined;
 }
 
+function selectedReasoningEffortRequestValue() {
+  const effort = effectiveReasoningEffort();
+  return effort || undefined;
+}
+
 function selectedModelOption() {
   const selectedModelId = String(state.selectedModelId || "").trim();
   if (!selectedModelId) {
@@ -1321,6 +1401,71 @@ function defaultModelDisplayName() {
 
 function activeModelDisplayName() {
   return selectedModelOption()?.displayName || state.selectedModelId || defaultModelDisplayName();
+}
+
+function effectiveModelOption() {
+  return selectedModelOption() || defaultModelOption();
+}
+
+function supportedReasoningOptions() {
+  return effectiveModelOption()?.supportedReasoningEfforts || [];
+}
+
+function effectiveReasoningEffort() {
+  const supportedOptions = supportedReasoningOptions();
+  const supportedEfforts = new Set(supportedOptions.map((option) => option.reasoningEffort));
+  if (!supportedEfforts.size) {
+    return "";
+  }
+
+  const selectedReasoningEffort = String(state.selectedReasoningEffort || "").trim();
+  if (selectedReasoningEffort && supportedEfforts.has(selectedReasoningEffort)) {
+    return selectedReasoningEffort;
+  }
+
+  const defaultEffort = String(effectiveModelOption()?.defaultReasoningEffort || "").trim();
+  if (defaultEffort && supportedEfforts.has(defaultEffort)) {
+    return defaultEffort;
+  }
+
+  if (supportedEfforts.has("medium")) {
+    return "medium";
+  }
+
+  return supportedOptions[0]?.reasoningEffort || "";
+}
+
+function reasoningDisplayTitle(effort) {
+  const normalized = String(effort || "").trim().toLowerCase();
+  switch (normalized) {
+    case "minimal":
+    case "low":
+      return "Low";
+    case "medium":
+      return "Medium";
+    case "high":
+      return "High";
+    case "xhigh":
+    case "extra_high":
+    case "extra-high":
+    case "very_high":
+    case "very-high":
+      return "Extra High";
+    default:
+      return normalized
+        .split("_")
+        .filter(Boolean)
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(" ") || "Thinking";
+  }
+}
+
+function activeReasoningDisplayTitle() {
+  return reasoningDisplayTitle(effectiveReasoningEffort());
+}
+
+function isSelectedReasoningEffort(effort) {
+  return effectiveReasoningEffort() === String(effort || "").trim();
 }
 
 function describeModelOption(option) {

@@ -924,6 +924,9 @@ async function handleApiRequest(req, res, url) {
       ...(Object.prototype.hasOwnProperty.call(body, "selectedModelId")
         ? { selectedModelId: body.selectedModelId }
         : {}),
+      ...(Object.prototype.hasOwnProperty.call(body, "selectedReasoningEffort")
+        ? { selectedReasoningEffort: body.selectedReasoningEffort }
+        : {}),
     };
 
     writeJson(res, 200, {
@@ -1153,9 +1156,11 @@ function writePinnedThreadIds(threadIds) {
 function normalizeUiPreferences(value) {
   const objectValue = value && typeof value === "object" ? value : {};
   const selectedModelId = String(objectValue.selectedModelId || "").trim();
+  const selectedReasoningEffort = String(objectValue.selectedReasoningEffort || "").trim();
 
   return {
     selectedModelId,
+    selectedReasoningEffort,
   };
 }
 
@@ -1404,7 +1409,37 @@ function decodeModelOption(modelObject) {
     displayName: stringOrEmpty(modelObject.displayName || modelObject.display_name) || model || id,
     description: stringOrEmpty(modelObject.description),
     isDefault: Boolean(modelObject.isDefault ?? modelObject.is_default),
+    supportedReasoningEfforts: decodeReasoningEfforts(
+      modelObject.supportedReasoningEfforts || modelObject.supported_reasoning_efforts
+    ),
+    defaultReasoningEffort: stringOrEmpty(
+      modelObject.defaultReasoningEffort || modelObject.default_reasoning_effort
+    ),
   };
+}
+
+function decodeReasoningEfforts(value) {
+  return (Array.isArray(value) ? value : [])
+    .map((entry) => {
+      if (typeof entry === "string") {
+        const normalized = entry.trim();
+        return normalized
+          ? { reasoningEffort: normalized, description: "" }
+          : null;
+      }
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+      const reasoningEffort = stringOrEmpty(entry.reasoningEffort || entry.reasoning_effort);
+      if (!reasoningEffort) {
+        return null;
+      }
+      return {
+        reasoningEffort,
+        description: stringOrEmpty(entry.description),
+      };
+    })
+    .filter(Boolean);
 }
 
 function decodePinnedThreadState(threadObject) {

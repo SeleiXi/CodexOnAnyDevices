@@ -228,16 +228,12 @@
 
           <form id="composer-form" class="composer-stack">
             <div class="composer-card glass-panel">
-              <textarea
-                id="composer-input"
-                rows="3"
-                placeholder="Ask anything..."
-              ></textarea>
-
-              <div class="composer-bar">
-                <div class="composer-hint">
-                  Messages route through the current Remodex bridge session.
-                </div>
+              <div class="composer-inline-row">
+                <textarea
+                  id="composer-input"
+                  rows="1"
+                  placeholder="Ask anything..."
+                ></textarea>
                 <button id="send-button" class="primary-button" type="submit">
                   Send
                 </button>
@@ -261,6 +257,28 @@
                 </button>
 
                 <div id="model-menu" class="access-mode-menu glass-panel" hidden></div>
+              </div>
+
+              <div class="composer-reasoning-control">
+                <button
+                  id="reasoning-button"
+                  class="ghost-button compact access-mode-button model-button"
+                  type="button"
+                  aria-haspopup="true"
+                  aria-expanded="false"
+                >
+                  <strong id="reasoning-summary">Medium</strong>
+                  <span
+                    class="access-mode-button__chevron"
+                    aria-hidden="true"
+                  ></span>
+                </button>
+
+                <div
+                  id="reasoning-menu"
+                  class="access-mode-menu glass-panel"
+                  hidden
+                ></div>
               </div>
 
               <div class="composer-access-control">
