@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Remodex</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+
+    <section id="auth-screen" class="auth-screen">
+      <div class="auth-card glass-panel">
+        <div class="brand-lockup">
+          <div class="brand-tile">R</div>
+          <div class="brand-copy">
+            <p class="micro-label">Remodex</p>
+            <h1>Unlock the bridge</h1>
+          </div>
+        </div>
+
+        <div class="status-capsule auth-capsule">
+          <span class="status-dot muted"></span>
+          <span>Persistent admin session with IP rate limiting</span>
+        </div>
+
+        <p id="auth-status" class="support-copy">Enter the admin password to access Remodex Web.</p>
+        <p id="auth-error" class="inline-error" hidden></p>
+
+        <form id="login-form" class="auth-form">
+          <label class="field">
+            <span>Password</span>
+            <input id="password-input" type="password" autocomplete="current-password" placeholder="Admin password">
+          </label>
+          <button id="login-button" class="primary-button" type="submit">Sign In</button>
+        </form>
+      </div>
+    </section>
+
+    <section id="app-shell" class="app-shell" hidden>
+      <header class="app-topbar glass-panel">
+        <div class="brand-lockup sidebar-brand">
+          <div class="brand-tile small">R</div>
+          <div class="brand-copy">
+            <p class="micro-label">Remodex</p>
+            <h2>Workspace</h2>
+          </div>
+        </div>
+
+        <nav class="view-switcher" aria-label="Primary">
+          <button id="nav-chat-button" class="view-tab active" type="button">Chat</button>
+          <button id="nav-connection-button" class="view-tab" type="button">Connection</button>
+        </nav>
+
+        <div class="topbar-meta">
+          <span id="connection-badge" class="status-capsule cold">Disconnected</span>
+          <button id="logout-button" class="ghost-button compact" type="button">Log Out</button>
+        </div>
+      </header>
+
+      <section id="chat-page" class="page-shell">
+        <aside class="sidebar">
+          <div class="sidebar-header">
+            <div class="brand-lockup sidebar-brand">
+              <div class="brand-tile small">R</div>
+              <div class="brand-copy">
+                <p class="micro-label">Remodex</p>
+                <h2>Chats</h2>
+              </div>
+            </div>
+
+            <button id="toggle-sidebar-button" class="floating-button mobile-only" type="button" aria-label="Close chat list">
+              <span>✕</span>
+            </button>
+          </div>
+
+          <div class="sidebar-tools">
+            <label class="search-shell">
+              <span class="search-icon">⌕</span>
+              <input id="thread-search-input" type="text" placeholder="Search conversations">
+            </label>
+
+            <button id="new-thread-button" class="new-chat-button" type="button">
+              <span class="new-chat-icon">+</span>
+              <span>New Chat</span>
+            </button>
+          </div>
+
+          <div id="thread-list" class="thread-list"></div>
+
+          <div class="sidebar-footer">
+            <div class="paired-mac">
+              <p id="paired-mac-label" class="micro-label muted">Saved Mac</p>
+              <strong id="paired-mac-name">No pairing yet</strong>
+            </div>
+
+            <div class="session-summary">
+              <span class="micro-label muted">Session</span>
+              <strong id="session-expiry-label">Not signed in</strong>
+            </div>
+          </div>
+        </aside>
+
+        <div id="sidebar-scrim" class="sidebar-scrim" hidden></div>
+
+        <main class="stage">
+          <header class="stage-header">
+            <div class="stage-heading">
+              <p class="micro-label">Conversation</p>
+              <h1 id="thread-title">Remodex</h1>
+              <p id="thread-subtitle" class="support-copy">Choose a conversation or start a new chat.</p>
+            </div>
+
+            <div class="stage-actions">
+              <button id="open-sidebar-button" class="toolbar-button mobile-only" type="button">Chats</button>
+              <button id="open-settings-inline" class="toolbar-button" type="button">Connection</button>
+            </div>
+          </header>
+
+          <section id="status-banner" class="status-banner" hidden>
+            <div>
+              <p id="status-banner-title" class="banner-title"></p>
+              <p id="status-banner-copy" class="banner-copy"></p>
+            </div>
+            <button id="status-banner-action" class="ghost-button compact" type="button">Open</button>
+          </section>
+
+          <section id="home-state" class="home-state" hidden>
+            <div class="home-logo-shell">
+              <div class="brand-tile home">R</div>
+            </div>
+
+            <div id="home-status-pill" class="status-capsule">
+              <span id="home-status-dot" class="status-dot muted"></span>
+              <span id="home-status-label">Offline</span>
+            </div>
+
+            <div id="trusted-pair-card" class="trusted-card" hidden>
+              <div class="trusted-icon">⌘</div>
+              <div>
+                <p id="trusted-pair-title" class="micro-label muted">Saved Mac</p>
+                <strong id="trusted-pair-name">No pairing yet</strong>
+                <p id="trusted-pair-detail" class="support-copy"></p>
+              </div>
+            </div>
+
+            <p id="home-security-label" class="support-copy"></p>
+            <p id="home-message" class="support-copy"></p>
+
+            <div class="home-actions">
+              <button id="home-primary-button" class="primary-button" type="button">Connect to Bridge</button>
+              <button id="home-secondary-button" class="ghost-button" type="button">Load Local JSON</button>
+            </div>
+          </section>
+
+          <div id="message-list" class="message-list"></div>
+
+          <form id="composer-form" class="composer-stack">
+            <div class="composer-card glass-panel">
+              <textarea id="composer-input" rows="4" placeholder="Ask anything... @files, $skills, /commands"></textarea>
+
+              <div class="composer-bar">
+                <div class="composer-hint">
+                  Messages route through the current Remodex bridge session.
+                </div>
+                <button id="send-button" class="primary-button" type="submit">Send</button>
+              </div>
+            </div>
+
+            <div class="composer-secondary">
+              <div class="meta-pill">
+                <span>Access</span>
+                <strong id="access-mode-summary">Full Access</strong>
+              </div>
+
+              <div class="meta-pill">
+                <span>Project</span>
+                <strong id="project-path-summary">No project selected</strong>
+              </div>
+
+              <button id="refresh-thread-button" class="ghost-button compact" type="button">Refresh</button>
+            </div>
+          </form>
+        </main>
+      </section>
+
+      <section id="connection-page" class="page-shell connection-page" hidden>
+        <main class="connection-stage glass-panel">
+          <header class="settings-header">
+            <div>
+              <p class="micro-label">Bridge Control</p>
+              <h2>Connection & Security</h2>
+            </div>
+          </header>
+
+          <div class="settings-block">
+            <div class="metric-card">
+              <span class="micro-label muted">State</span>
+              <strong id="connection-status">Disconnected</strong>
+              <p id="connection-detail" class="support-copy">Load a pairing payload to connect.</p>
+            </div>
+
+            <div class="settings-actions">
+              <button id="load-default-pairing" class="ghost-button" type="button">Load Local JSON</button>
+              <button id="connect-button" class="primary-button" type="button">Connect</button>
+              <button id="disconnect-button" class="ghost-button" type="button">Disconnect</button>
+            </div>
+          </div>
+
+          <div class="settings-block">
+            <label class="field">
+              <span>Pairing JSON</span>
+              <textarea id="pairing-json" spellcheck="false" rows="8" placeholder='{"relay":"ws://...","sessionId":"..."}'></textarea>
+            </label>
+
+            <div class="settings-grid">
+              <label class="field">
+                <span>Access Mode</span>
+                <select id="access-mode">
+                  <option value="full-access">Full Access</option>
+                  <option value="on-request">On-Request</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Project Path</span>
+                <input id="project-path" type="text" placeholder="/root/coding/project">
+              </label>
+            </div>
+
+            <p id="app-error" class="inline-error" hidden></p>
+          </div>
+
+          <section class="security-card">
+            <div class="section-heading">
+              <p class="micro-label">Edge Security</p>
+              <h3>IP Access Policy</h3>
+            </div>
+
+            <div class="metric-card">
+              <span class="micro-label muted">Current Request</span>
+              <strong id="current-ip-label">Unknown</strong>
+              <p id="proxy-mode-label" class="support-copy">Direct origin access.</p>
+            </div>
+
+            <label class="toggle-row">
+              <span>Enable IP allowlist</span>
+              <input id="allowlist-enabled" type="checkbox">
+            </label>
+
+            <label class="toggle-row">
+              <span>Trust Cloudflare proxy headers</span>
+              <input id="trust-proxy-headers" type="checkbox">
+            </label>
+
+            <label class="field">
+              <span>Allowed IPs / CIDRs</span>
+              <textarea id="allowed-cidrs" spellcheck="false" rows="5" placeholder="127.0.0.1&#10;203.0.113.8&#10;198.51.100.0/24"></textarea>
+            </label>
+
+            <label class="field">
+              <span>Trusted proxy CIDRs</span>
+              <textarea id="trusted-proxy-cidrs" spellcheck="false" rows="5" placeholder="Cloudflare edge ranges"></textarea>
+            </label>
+
+            <div class="settings-actions two-up">
+              <button id="save-security-button" class="primary-button" type="button">Save Policy</button>
+              <button id="use-cloudflare-button" class="ghost-button" type="button">Use Cloudflare Defaults</button>
+            </div>
+          </section>
+
+          <section id="approval-panel" class="approval-card" hidden>
+            <div class="section-heading">
+              <p class="micro-label">Approval</p>
+              <h3>Bridge is waiting</h3>
+            </div>
+            <pre id="approval-text"></pre>
+            <div class="settings-actions two-up">
+              <button id="approve-button" class="primary-button" type="button">Approve</button>
+              <button id="decline-button" class="ghost-button" type="button">Decline</button>
+            </div>
+          </section>
+        </main>
+      </section>
+    </section>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

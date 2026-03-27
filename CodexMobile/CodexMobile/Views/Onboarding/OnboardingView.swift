@@ -1,0 +1,145 @@
+// FILE: OnboardingView.swift
+// Purpose: Split onboarding flow — swipeable pages with fixed bottom bar.
+// Layer: View
+// Exports: OnboardingView
+// Depends on: SwiftUI, OnboardingWelcomePage, OnboardingFeaturesPage, OnboardingStepPage
+
+import SwiftUI
+
+struct OnboardingView: View {
+    let onContinue: () -> Void
+    @State private var currentPage = 0
+
+    private let pageCount = 5
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                TabView(selection: $currentPage) {
+                    OnboardingWelcomePage()
+                        .tag(0)
+
+                    OnboardingFeaturesPage()
+                        .tag(1)
+
+                    OnboardingStepPage(
+                        stepNumber: 1,
+                        icon: "terminal",
+                        title: "Install Codex CLI",
+                        description: "The AI coding agent that lives in your terminal. Remodex connects to it from your iPhone.",
+                        command: "npm install -g @openai/codex@latest"
+                    )
+                    .tag(2)
+
+                    OnboardingStepPage(
+                        stepNumber: 2,
+                        icon: "link",
+                        title: "Install the Bridge",
+                        description: "A lightweight relay that securely connects your Mac to your iPhone.",
+                        command: "npm install -g remodex@latest"
+                    )
+                    .tag(3)
+
+                    OnboardingStepPage(
+                        stepNumber: 3,
+                        icon: "qrcode.viewfinder",
+                        title: "Start Pairing",
+                        description: "Run this on your Mac. A QR code will appear in your terminal — scan it next.",
+                        command: "remodex up"
+                    )
+                    .tag(4)
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+
+                bottomBar
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    // MARK: - Bottom bar
+
+    private var bottomBar: some View {
+        VStack(spacing: 20) {
+            // Animated pill dots
+            HStack(spacing: 8) {
+                ForEach(0..<pageCount, id: \.self) { i in
+                    Capsule()
+                        .fill(i == currentPage ? Color.white : Color.white.opacity(0.18))
+                        .frame(width: i == currentPage ? 24 : 8, height: 8)
+                }
+            }
+            .animation(.spring(response: 0.35, dampingFraction: 0.8), value: currentPage)
+
+            // CTA button
+            Button(action: handleContinue) {
+                HStack(spacing: 10) {
+                    if currentPage == pageCount - 1 {
+                        Image(systemName: "qrcode")
+                            .font(.system(size: 15, weight: .semibold))
+                    }
+
+                    Text(buttonTitle)
+                        .font(AppFont.body(weight: .semibold))
+                }
+                .foregroundStyle(.black)
+                .frame(maxWidth: .infinity)
+                .frame(height: 56)
+                .background(.white, in: Capsule())
+            }
+            .buttonStyle(.plain)
+
+            OpenSourceBadge(style: .light)
+        }
+        .padding(.horizontal, 24)
+        .padding(.bottom, 12)
+        .background(
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.6), .black],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 50)
+            .offset(y: -50),
+            alignment: .top
+        )
+    }
+
+    // MARK: - State
+
+    private var buttonTitle: String {
+        switch currentPage {
+        case 0: return "Get Started"
+        case 1: return "Set Up"
+        case pageCount - 1: return "Scan QR Code"
+        default: return "Continue"
+        }
+    }
+
+    private func handleContinue() {
+        if currentPage < pageCount - 1 {
+            withAnimation(.easeInOut(duration: 0.3)) {
+                currentPage += 1
+            }
+        } else {
+            onContinue()
+        }
+    }
+}
+
+// MARK: - Previews
+
+#Preview("Full Flow") {
+    OnboardingView {
+        print("Continue tapped")
+    }
+}
+
+#Preview("Light Override") {
+    OnboardingView {
+        print("Continue tapped")
+    }
+    .preferredColorScheme(.light)
+}

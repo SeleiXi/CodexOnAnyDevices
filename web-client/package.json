@@ -1,0 +1,12 @@
+{
+  "name": "remodex-web-client",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node ./server.js",
+    "set-password": "node ./set-password.js"
+  },
+  "dependencies": {
+    "ws": "^8.19.0"
+  }
+}

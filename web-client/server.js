@@ -1,0 +1,1606 @@
+const fs = require("fs");
+const http = require("http");
+const path = require("path");
+const { URL } = require("url");
+const {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  createPrivateKey,
+  createPublicKey,
+  diffieHellman,
+  generateKeyPairSync,
+  hkdfSync,
+  randomBytes,
+  randomUUID,
+  sign,
+  verify,
+} = require("crypto");
+const { WebSocket } = require("ws");
+const { createAuthManager } = require("./auth");
+const { createBridgeRuntimeManager } = require("./bridge-runtime");
+const { createSecurityManager } = require("./security");
+
+const ROOT_DIR = __dirname;
+const REPO_DIR = path.dirname(ROOT_DIR);
+const PUBLIC_DIR = path.join(ROOT_DIR, "public");
+const STATE_DIR = path.join(ROOT_DIR, "state");
+const AUTH_STATE_FILE = path.join(STATE_DIR, "auth-state.json");
+const SECURITY_STATE_FILE = path.join(STATE_DIR, "security-state.json");
+const PHONE_IDENTITY_FILE = path.join(STATE_DIR, "phone-identity.json");
+const DEFAULT_PAIRING_FILE = path.join(REPO_DIR, "remodex-pairing.json");
+const HTTP_PORT = Number.parseInt(process.env.PORT || "8787", 10);
+const PREFER_LOCAL_RELAY = process.env.REMODEX_WEB_PREFER_LOCAL_RELAY !== "false";
+const LOCAL_RELAY_HOST = process.env.REMODEX_WEB_LOCAL_RELAY_HOST || "127.0.0.1";
+const SECURE_PROTOCOL_VERSION = 1;
+const HANDSHAKE_TAG = "remodex-e2ee-v1";
+const HANDSHAKE_LABEL = "client-auth";
+const HANDSHAKE_MODE_QR_BOOTSTRAP = "qr_bootstrap";
+const SECURE_SENDER_IPHONE = "iphone";
+const SECURE_SENDER_MAC = "mac";
+const THREAD_LIST_SOURCE_KINDS = ["cli", "vscode", "appServer", "exec", "unknown"];
+const CONTROL_MESSAGE_TIMEOUT_MS = 15_000;
+const MAX_BODY_BYTES = 1024 * 1024;
+
+class RemodexWebClient {
+  constructor() {
+    fs.mkdirSync(STATE_DIR, { recursive: true });
+    this.phoneIdentity = loadOrCreatePhoneIdentity(PHONE_IDENTITY_FILE);
+    this.socket = null;
+    this.pairingPayload = null;
+    this.secureSession = null;
+    this.pendingControlWaiters = new Set();
+    this.pendingRequests = new Map();
+    this.pendingApproval = null;
+    this.lastAppliedBridgeOutboundSeq = 0;
+    this.isConnected = false;
+    this.isInitialized = false;
+    this.lastDisconnect = null;
+  }
+
+  status() {
+    return {
+      isConnected: this.isConnected,
+      isInitialized: this.isInitialized,
+      secureSessionId: this.secureSession?.sessionId || "",
+      relayUrl: this.pairingPayload?.relay || "",
+      macDeviceId: this.pairingPayload?.macDeviceId || "",
+      phoneDeviceId: this.phoneIdentity.phoneDeviceId,
+      pendingApproval: this.pendingApproval,
+      lastDisconnect: this.lastDisconnect,
+    };
+  }
+
+  async connect(pairingPayload) {
+    const payload = validatePairingPayload(pairingPayload);
+    await this.disconnect();
+
+    this.pairingPayload = payload;
+    this.pendingApproval = null;
+    this.lastAppliedBridgeOutboundSeq = 0;
+    this.lastDisconnect = null;
+
+    const relayURL = new URL(`${payload.relay.replace(/\/+$/, "")}/${payload.sessionId}`);
+    const socket = await openWebSocket(relayURL.toString(), {
+      headers: {
+        "x-role": "iphone",
+      },
+    });
+
+    this.socket = socket;
+    this.attachSocketHandlers(socket);
+
+    try {
+      await this.performSecureHandshake(payload);
+      await this.initializeSession();
+      this.isConnected = true;
+      return this.status();
+    } catch (error) {
+      await this.disconnect();
+      throw error;
+    }
+  }
+
+  async disconnect() {
+    const socket = this.socket;
+    this.socket = null;
+    this.isConnected = false;
+    this.isInitialized = false;
+    this.pendingApproval = null;
+    this.clearPendingWithoutReject();
+    this.secureSession = null;
+
+    if (!socket) {
+      return;
+    }
+
+    await new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        resolve();
+      };
+
+      socket.once("close", finish);
+      socket.once("error", finish);
+
+      try {
+        socket.close(1000, "Client disconnect");
+      } catch {
+        finish();
+      }
+
+      setTimeout(finish, 1000).unref?.();
+    });
+  }
+
+  attachSocketHandlers(socket) {
+    socket.on("message", (chunk) => {
+      const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      this.handleWireMessage(text);
+    });
+
+    socket.on("close", (code, reason) => {
+      this.lastDisconnect = {
+        code,
+        reason: reason ? reason.toString("utf8") : "",
+      };
+      this.isConnected = false;
+      this.isInitialized = false;
+      this.rejectAllPending(new Error(`Relay closed (${code}) ${this.lastDisconnect.reason}`.trim()));
+      rejectControlWaiters(
+        this.pendingControlWaiters,
+        new Error(`Relay closed (${code}) ${this.lastDisconnect.reason}`.trim())
+      );
+      this.pendingControlWaiters.clear();
+      this.socket = null;
+      this.secureSession = null;
+    });
+
+    socket.on("error", (error) => {
+      this.lastDisconnect = {
+        code: 0,
+        reason: error.message,
+      };
+    });
+  }
+
+  async performSecureHandshake(payload) {
+    const phoneEphemeral = generateKeyPairSync("x25519");
+    const phoneEphemeralJwk = phoneEphemeral.privateKey.export({ format: "jwk" });
+    const clientNonce = randomBytes(32);
+    const clientHello = {
+      kind: "clientHello",
+      protocolVersion: SECURE_PROTOCOL_VERSION,
+      sessionId: payload.sessionId,
+      handshakeMode: HANDSHAKE_MODE_QR_BOOTSTRAP,
+      phoneDeviceId: this.phoneIdentity.phoneDeviceId,
+      phoneIdentityPublicKey: this.phoneIdentity.phoneIdentityPublicKey,
+      phoneEphemeralPublicKey: base64UrlToBase64(phoneEphemeralJwk.x),
+      clientNonce: clientNonce.toString("base64"),
+    };
+
+    this.sendWireControlMessage(clientHello);
+
+    const serverHello = await this.waitForControl((message) => {
+      if (message.kind === "secureError") {
+        throw new Error(message.message || message.code || "Secure handshake failed");
+      }
+      return message.kind === "serverHello" && message.sessionId === payload.sessionId;
+    });
+
+    if (serverHello.protocolVersion !== SECURE_PROTOCOL_VERSION) {
+      throw new Error("Secure protocol version mismatch");
+    }
+    if (serverHello.sessionId !== payload.sessionId) {
+      throw new Error("Unexpected secure session id");
+    }
+    if (serverHello.macDeviceId !== payload.macDeviceId) {
+      throw new Error("Mac device id mismatch");
+    }
+    if (serverHello.macIdentityPublicKey !== payload.macIdentityPublicKey) {
+      throw new Error("Mac public key mismatch");
+    }
+
+    const transcriptBytes = buildTranscriptBytes({
+      sessionId: payload.sessionId,
+      protocolVersion: serverHello.protocolVersion,
+      handshakeMode: serverHello.handshakeMode,
+      keyEpoch: serverHello.keyEpoch,
+      macDeviceId: serverHello.macDeviceId,
+      phoneDeviceId: this.phoneIdentity.phoneDeviceId,
+      macIdentityPublicKey: serverHello.macIdentityPublicKey,
+      phoneIdentityPublicKey: this.phoneIdentity.phoneIdentityPublicKey,
+      macEphemeralPublicKey: serverHello.macEphemeralPublicKey,
+      phoneEphemeralPublicKey: clientHello.phoneEphemeralPublicKey,
+      clientNonce,
+      serverNonce: base64ToBuffer(serverHello.serverNonce),
+      expiresAtForTranscript: serverHello.expiresAtForTranscript,
+    });
+
+    const serverSignatureValid = verifyTranscript(
+      serverHello.macIdentityPublicKey,
+      transcriptBytes,
+      serverHello.macSignature
+    );
+    if (!serverSignatureValid) {
+      throw new Error("Mac signature verification failed");
+    }
+
+    const clientAuthTranscript = Buffer.concat([
+      transcriptBytes,
+      encodeLengthPrefixedUTF8(HANDSHAKE_LABEL),
+    ]);
+    const phoneSignature = signTranscript(
+      this.phoneIdentity.phoneIdentityPrivateKey,
+      this.phoneIdentity.phoneIdentityPublicKey,
+      clientAuthTranscript
+    );
+
+    this.sendWireControlMessage({
+      kind: "clientAuth",
+      sessionId: payload.sessionId,
+      phoneDeviceId: this.phoneIdentity.phoneDeviceId,
+      keyEpoch: serverHello.keyEpoch,
+      phoneSignature,
+    });
+
+    const readyMessage = await this.waitForControl((message) => {
+      if (message.kind === "secureError") {
+        throw new Error(message.message || message.code || "Secure handshake failed");
+      }
+      return message.kind === "secureReady"
+        && message.sessionId === payload.sessionId
+        && Number(message.keyEpoch) === Number(serverHello.keyEpoch);
+    });
+
+    if (readyMessage.macDeviceId !== payload.macDeviceId) {
+      throw new Error("Unexpected mac device id in secureReady");
+    }
+
+    const sharedSecret = diffieHellman({
+      privateKey: createPrivateKey({
+        key: {
+          crv: "X25519",
+          d: phoneEphemeralJwk.d,
+          x: phoneEphemeralJwk.x,
+          kty: "OKP",
+        },
+        format: "jwk",
+      }),
+      publicKey: createPublicKey({
+        key: {
+          crv: "X25519",
+          x: base64ToBase64Url(serverHello.macEphemeralPublicKey),
+          kty: "OKP",
+        },
+        format: "jwk",
+      }),
+    });
+
+    const salt = createHash("sha256").update(transcriptBytes).digest();
+    const infoPrefix = [
+      HANDSHAKE_TAG,
+      payload.sessionId,
+      payload.macDeviceId,
+      this.phoneIdentity.phoneDeviceId,
+      String(serverHello.keyEpoch),
+    ].join("|");
+
+    this.secureSession = {
+      sessionId: payload.sessionId,
+      keyEpoch: serverHello.keyEpoch,
+      phoneToMacKey: deriveAesKey(sharedSecret, salt, `${infoPrefix}|phoneToMac`),
+      macToPhoneKey: deriveAesKey(sharedSecret, salt, `${infoPrefix}|macToPhone`),
+      lastInboundCounter: -1,
+      nextOutboundCounter: 0,
+    };
+
+    this.sendWireControlMessage({
+      kind: "resumeState",
+      sessionId: payload.sessionId,
+      keyEpoch: serverHello.keyEpoch,
+      lastAppliedBridgeOutboundSeq: this.lastAppliedBridgeOutboundSeq,
+    });
+  }
+
+  async initializeSession() {
+    const modernParams = {
+      clientInfo: {
+        name: "remodex_web",
+        title: "Remodex Web",
+        version: "0.1.0",
+      },
+      capabilities: {
+        experimentalApi: true,
+      },
+    };
+
+    try {
+      await this.sendRequest("initialize", modernParams);
+    } catch (error) {
+      if (!shouldRetryInitializeWithoutCapabilities(error)) {
+        throw error;
+      }
+
+      await this.sendRequest("initialize", {
+        clientInfo: modernParams.clientInfo,
+      });
+    }
+
+    await this.sendNotification("initialized", null);
+    this.isInitialized = true;
+  }
+
+  async listThreads(limit = 40) {
+    const response = await this.sendRequest("thread/list", {
+      sourceKinds: THREAD_LIST_SOURCE_KINDS,
+      cursor: null,
+      limit,
+    });
+    const result = response.result || {};
+    const items = result.data || result.items || result.threads || [];
+    return items.map(decodeThreadSummary).filter(Boolean);
+  }
+
+  async createThread({ cwd = "", accessMode = "full-access" } = {}) {
+    const params = {};
+    if (cwd.trim()) {
+      params.cwd = cwd.trim();
+    }
+    const response = await this.sendRequestWithSandboxFallback("thread/start", params, accessMode);
+    const thread = response.result?.thread;
+    if (!thread) {
+      throw new Error("thread/start response missing thread");
+    }
+    return decodeThreadSummary(thread);
+  }
+
+  async resumeThread(threadId, { cwd = "", accessMode = "full-access" } = {}) {
+    const params = {
+      threadId,
+    };
+    if (cwd.trim()) {
+      params.cwd = cwd.trim();
+    }
+    try {
+      return await this.sendRequestWithSandboxFallback("thread/resume", params, accessMode);
+    } catch (error) {
+      if (shouldIgnoreThreadResumeFailure(error)) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async startTurn(threadId, text, { accessMode = "full-access", cwd = "" } = {}) {
+    const trimmed = String(text || "").trim();
+    if (!trimmed) {
+      throw new Error("Message cannot be empty");
+    }
+
+    await this.resumeThread(threadId, { cwd, accessMode });
+
+    const response = await this.sendRequestWithSandboxFallback(
+      "turn/start",
+      {
+        threadId,
+        input: [
+          {
+            type: "text",
+            text: trimmed,
+          },
+        ],
+      },
+      accessMode
+    );
+    return response.result || {};
+  }
+
+  async readThread(threadId) {
+    const response = await this.sendRequest("thread/read", {
+      threadId,
+      includeTurns: true,
+    });
+    const threadObject = response.result?.thread;
+    if (!threadObject) {
+      throw new Error("thread/read response missing thread");
+    }
+
+    return {
+      thread: decodeThreadSummary(threadObject),
+      messages: decodeThreadMessages(threadId, threadObject),
+    };
+  }
+
+  async respondToApproval(decision) {
+    if (!this.pendingApproval) {
+      throw new Error("No pending approval");
+    }
+
+    const approval = this.pendingApproval;
+    this.pendingApproval = null;
+    await this.sendMessage({
+      id: approval.id,
+      result: {
+        decision,
+      },
+    });
+    return this.status();
+  }
+
+  async sendRequestWithSandboxFallback(method, baseParams, accessMode) {
+    const firstAttempt = {
+      ...baseParams,
+      sandboxPolicy: runtimeSandboxPolicyObject(accessMode),
+    };
+
+    try {
+      return await this.sendRequestWithApprovalPolicyFallback(method, firstAttempt, accessMode);
+    } catch (error) {
+      if (!shouldFallbackFromSandboxPolicy(error)) {
+        throw error;
+      }
+    }
+
+    const secondAttempt = {
+      ...baseParams,
+      sandbox: sandboxLegacyValue(accessMode),
+    };
+
+    try {
+      return await this.sendRequestWithApprovalPolicyFallback(method, secondAttempt, accessMode);
+    } catch (error) {
+      if (!shouldFallbackFromSandboxPolicy(error)) {
+        throw error;
+      }
+    }
+
+    return this.sendRequestWithApprovalPolicyFallback(method, baseParams, accessMode);
+  }
+
+  async sendRequestWithApprovalPolicyFallback(method, baseParams, accessMode) {
+    const candidates = approvalPolicyCandidates(accessMode);
+    let lastError = null;
+
+    for (let index = 0; index < candidates.length; index += 1) {
+      const params = {
+        ...baseParams,
+        approvalPolicy: candidates[index],
+      };
+
+      try {
+        return await this.sendRequest(method, params);
+      } catch (error) {
+        lastError = error;
+        const hasMore = index < candidates.length - 1;
+        if (hasMore && shouldRetryWithApprovalPolicyFallback(error)) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    throw lastError || new Error(`${method} failed`);
+  }
+
+  async sendRequest(method, params) {
+    const requestId = randomUUID();
+    const responsePromise = new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pendingRequests.delete(requestId);
+        reject(new Error(`${method} timed out`));
+      }, 30_000);
+      timeout.unref?.();
+
+      this.pendingRequests.set(requestId, {
+        resolve,
+        reject,
+        timeout,
+        method,
+      });
+    });
+
+    await this.sendMessage({
+      id: requestId,
+      method,
+      params,
+    });
+
+    return responsePromise;
+  }
+
+  async sendNotification(method, params) {
+    await this.sendMessage({
+      method,
+      params,
+    });
+  }
+
+  async sendMessage(message) {
+    if (!this.secureSession || !this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      throw new Error("Remodex secure session is not connected");
+    }
+
+    const payloadText = JSON.stringify(message);
+    const envelope = encryptEnvelopePayload(
+      {
+        bridgeOutboundSeq: null,
+        payloadText,
+      },
+      this.secureSession.phoneToMacKey,
+      SECURE_SENDER_IPHONE,
+      this.secureSession.nextOutboundCounter,
+      this.secureSession.sessionId,
+      this.secureSession.keyEpoch
+    );
+    this.secureSession.nextOutboundCounter += 1;
+    this.socket.send(JSON.stringify(envelope));
+  }
+
+  sendWireControlMessage(payload) {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      throw new Error("Relay socket is not connected");
+    }
+    this.socket.send(JSON.stringify(payload));
+  }
+
+  waitForControl(match) {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pendingControlWaiters.delete(waiter);
+        reject(new Error("Secure control message timed out"));
+      }, CONTROL_MESSAGE_TIMEOUT_MS);
+      timeout.unref?.();
+
+      const waiter = {
+        match,
+        resolve,
+        reject,
+        timeout,
+      };
+      this.pendingControlWaiters.add(waiter);
+    });
+  }
+
+  handleWireMessage(text) {
+    const message = safeParseJSON(text);
+    if (!message || typeof message !== "object") {
+      return;
+    }
+
+    if (message.kind === "serverHello" || message.kind === "secureReady" || message.kind === "secureError") {
+      for (const waiter of [...this.pendingControlWaiters]) {
+        try {
+          const isMatch = waiter.match(message);
+          if (!isMatch) {
+            continue;
+          }
+          clearTimeout(waiter.timeout);
+          this.pendingControlWaiters.delete(waiter);
+          waiter.resolve(message);
+        } catch (error) {
+          clearTimeout(waiter.timeout);
+          this.pendingControlWaiters.delete(waiter);
+          waiter.reject(error);
+        }
+      }
+      return;
+    }
+
+    if (message.kind === "encryptedEnvelope") {
+      this.handleEncryptedEnvelope(message);
+    }
+  }
+
+  handleEncryptedEnvelope(envelope) {
+    if (!this.secureSession) {
+      return;
+    }
+    if (envelope.sessionId !== this.secureSession.sessionId) {
+      return;
+    }
+    if (Number(envelope.keyEpoch) !== Number(this.secureSession.keyEpoch)) {
+      return;
+    }
+    if (envelope.sender !== SECURE_SENDER_MAC) {
+      return;
+    }
+    if (Number(envelope.counter) <= this.secureSession.lastInboundCounter) {
+      return;
+    }
+
+    const decrypted = decryptEnvelopeBuffer(
+      envelope,
+      this.secureSession.macToPhoneKey,
+      SECURE_SENDER_MAC,
+      envelope.counter
+    );
+    if (!decrypted) {
+      return;
+    }
+
+    this.secureSession.lastInboundCounter = Number(envelope.counter);
+
+    const applicationPayload = safeParseJSON(decrypted.toString("utf8"));
+    if (!applicationPayload || typeof applicationPayload !== "object") {
+      return;
+    }
+    if (Number.isInteger(applicationPayload.bridgeOutboundSeq)) {
+      this.lastAppliedBridgeOutboundSeq = Math.max(
+        this.lastAppliedBridgeOutboundSeq,
+        applicationPayload.bridgeOutboundSeq
+      );
+    }
+
+    const rpcMessage = safeParseJSON(applicationPayload.payloadText);
+    if (!rpcMessage || typeof rpcMessage !== "object") {
+      return;
+    }
+
+    this.routeRpcMessage(rpcMessage);
+  }
+
+  routeRpcMessage(rpcMessage) {
+    const requestId = rpcMessage.id != null ? String(rpcMessage.id) : "";
+    if (requestId && (Object.hasOwn(rpcMessage, "result") || Object.hasOwn(rpcMessage, "error"))) {
+      const pending = this.pendingRequests.get(requestId);
+      if (!pending) {
+        return;
+      }
+
+      clearTimeout(pending.timeout);
+      this.pendingRequests.delete(requestId);
+
+      if (rpcMessage.error) {
+        pending.reject(toRpcError(rpcMessage.error));
+      } else {
+        pending.resolve(rpcMessage);
+      }
+      return;
+    }
+
+    if (requestId && rpcMessage.method) {
+      if (isApprovalRequestMethod(rpcMessage.method)) {
+        this.pendingApproval = {
+          id: rpcMessage.id,
+          method: rpcMessage.method,
+          params: rpcMessage.params || null,
+        };
+      }
+    }
+  }
+
+  rejectAllPending(error) {
+    for (const [requestId, pending] of this.pendingRequests.entries()) {
+      clearTimeout(pending.timeout);
+      pending.reject(error);
+      this.pendingRequests.delete(requestId);
+    }
+  }
+
+  clearPendingWithoutReject() {
+    for (const pending of this.pendingRequests.values()) {
+      clearTimeout(pending.timeout);
+    }
+    this.pendingRequests.clear();
+
+    for (const waiter of this.pendingControlWaiters) {
+      clearTimeout(waiter.timeout);
+    }
+    this.pendingControlWaiters.clear();
+  }
+}
+
+const client = new RemodexWebClient();
+const auth = createAuthManager({
+  stateFile: AUTH_STATE_FILE,
+  forceSecureCookies: process.env.REMODEX_WEB_COOKIE_SECURE === "true",
+});
+const security = createSecurityManager({
+  stateFile: SECURITY_STATE_FILE,
+  initialState: {
+    allowlistEnabled: process.env.REMODEX_WEB_ALLOWLIST_ENABLED === "true",
+    trustProxyHeaders: process.env.REMODEX_WEB_TRUST_PROXY_HEADERS === "true",
+    allowedCidrs: parseEnvList(process.env.REMODEX_WEB_ALLOWLIST),
+    trustedProxyCidrs: parseEnvList(process.env.REMODEX_WEB_TRUSTED_PROXY_CIDRS),
+  },
+});
+const bridgeRuntime = createBridgeRuntimeManager({
+  repoDir: REPO_DIR,
+  pairingFile: DEFAULT_PAIRING_FILE,
+  stateDir: STATE_DIR,
+  defaultHostname: process.env.REMODEX_WEB_BRIDGE_HOSTNAME || "",
+  defaultPort: Number.parseInt(process.env.REMODEX_WEB_BRIDGE_PORT || "9100", 10),
+});
+
+const server = http.createServer(async (req, res) => {
+  try {
+    const url = new URL(req.url || "/", "http://127.0.0.1");
+    const connection = security.assertRequestAllowed(req);
+
+    res.setHeader("x-remodex-client-ip", connection.clientIp);
+    res.setHeader("x-remodex-allowlist", security.getSummary(req).allowlistEnabled ? "enforced" : "disabled");
+
+    if (url.pathname.startsWith("/api/")) {
+      await handleApiRequest(req, res, url);
+      return;
+    }
+
+    serveStaticFile(res, url.pathname);
+  } catch (error) {
+    writeJson(res, error.status || 500, {
+      ok: false,
+      error: error.message || "Internal server error",
+      code: error.code || "internal_error",
+      ban: error.ban || null,
+      remainingBeforeShortBan: error.remainingBeforeShortBan ?? null,
+    });
+  }
+});
+
+server.listen(HTTP_PORT, "0.0.0.0", () => {
+  console.log(`[remodex-web] listening on http://0.0.0.0:${HTTP_PORT}`);
+  if (!auth.hasPasswordConfigured()) {
+    console.warn("[remodex-web] admin password is not configured; run `npm run set-password -- --generate`");
+  }
+  const securitySummary = security.getSummary({
+    headers: {},
+    socket: { remoteAddress: "127.0.0.1" },
+  });
+  console.log(
+    `[remodex-web] allowlist=${securitySummary.allowlistEnabled ? "on" : "off"} proxy_headers=${securitySummary.trustProxyHeaders ? "trusted" : "direct"}`
+  );
+});
+
+async function handleApiRequest(req, res, url) {
+  const connection = security.assertRequestAllowed(req);
+
+  if (req.method === "GET" && url.pathname === "/api/auth/session") {
+    writeJson(res, 200, {
+      ok: true,
+      ...auth.getAuthSessionSummary(req),
+      ban: auth.getCurrentBan(connection.clientIp),
+      security: security.getSummary(req),
+    });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/auth/login") {
+    const body = await readJsonBody(req);
+    const result = auth.login({
+      password: body.password || "",
+      ip: connection.clientIp,
+      userAgent: req.headers["user-agent"] || "",
+    });
+    res.setHeader(
+      "set-cookie",
+      auth.buildSessionCookie(result.token, {
+        expiresAt: result.expiresAt,
+        secure: requestIsSecure(req),
+      })
+    );
+    writeJson(res, 200, {
+      ok: true,
+      authenticated: true,
+      expiresAt: result.expiresAt,
+    });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/auth/logout") {
+    auth.logout(req);
+    res.setHeader(
+      "set-cookie",
+      auth.buildClearSessionCookie({
+        secure: requestIsSecure(req),
+      })
+    );
+    writeJson(res, 200, {
+      ok: true,
+      authenticated: false,
+    });
+    return;
+  }
+
+  const authSession = auth.getAuthSession(req);
+  if (!authSession) {
+    writeJson(res, 401, {
+      ok: false,
+      code: "not_authenticated",
+      error: "Authentication required",
+    });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/status") {
+    writeJson(res, 200, {
+      ok: true,
+      status: client.status(),
+      security: security.getSummary(req),
+      session: {
+        createdAt: authSession.createdAt,
+        expiresAt: authSession.expiresAt,
+      },
+    });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/security") {
+    writeJson(res, 200, {
+      ok: true,
+      security: security.getSummary(req),
+    });
+    return;
+  }
+
+  if (req.method === "PUT" && url.pathname === "/api/security") {
+    const body = await readJsonBody(req);
+    const nextState = security.update({
+      allowlistEnabled: body.allowlistEnabled,
+      trustProxyHeaders: body.trustProxyHeaders,
+      allowedCidrs: body.allowedCidrs,
+      trustedProxyCidrs: body.trustedProxyCidrs,
+    });
+    writeJson(res, 200, {
+      ok: true,
+      security: {
+        ...nextState,
+        currentRequestIp: connection.clientIp,
+        remoteAddress: connection.remoteAddress,
+        proxyHeaderTrusted: connection.proxyHeaderTrusted,
+      },
+    });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/pairing/default") {
+    const forceRefresh = url.searchParams.get("refresh") === "1";
+    const existingPairing = readJsonFileSafe(DEFAULT_PAIRING_FILE);
+    const allowStale = Boolean(client.status().isConnected && existingPairing);
+    const pairingPayload = await bridgeRuntime.ensureFreshPairing({
+      forceRefresh,
+      allowStale,
+    });
+
+    writeJson(res, 200, {
+      ok: true,
+      pairingPayload: pairPayloadForWeb(pairingPayload),
+    });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/connect") {
+    const body = await readJsonBody(req);
+    const status = await client.connect(body.pairingPayload || body);
+    writeJson(res, 200, {
+      ok: true,
+      status,
+    });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/disconnect") {
+    await client.disconnect();
+    writeJson(res, 200, {
+      ok: true,
+      status: client.status(),
+    });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/threads") {
+    const threads = await client.listThreads();
+    writeJson(res, 200, {
+      ok: true,
+      threads,
+    });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/threads") {
+    const body = await readJsonBody(req);
+    const thread = await client.createThread(body || {});
+    writeJson(res, 200, {
+      ok: true,
+      thread,
+    });
+    return;
+  }
+
+  const threadMatch = url.pathname.match(/^\/api\/threads\/([^/]+)$/);
+  if (req.method === "GET" && threadMatch) {
+    const threadId = decodeURIComponent(threadMatch[1]);
+    const data = await client.readThread(threadId);
+    writeJson(res, 200, {
+      ok: true,
+      ...data,
+    });
+    return;
+  }
+
+  const turnMatch = url.pathname.match(/^\/api\/threads\/([^/]+)\/turns$/);
+  if (req.method === "POST" && turnMatch) {
+    const threadId = decodeURIComponent(turnMatch[1]);
+    const body = await readJsonBody(req);
+    const result = await client.startTurn(threadId, body.text || "", body || {});
+    writeJson(res, 200, {
+      ok: true,
+      result,
+    });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/approvals/current") {
+    const body = await readJsonBody(req);
+    const status = await client.respondToApproval(body.decision || "accept");
+    writeJson(res, 200, {
+      ok: true,
+      status,
+    });
+    return;
+  }
+
+  writeJson(res, 404, {
+    ok: false,
+    error: "Not found",
+  });
+}
+
+function serveStaticFile(res, pathname) {
+  const normalizedPath = pathname === "/" ? "/index.html" : pathname;
+  const resolvedPath = path.join(PUBLIC_DIR, path.normalize(normalizedPath).replace(/^(\.\.[/\\])+/, ""));
+  if (!resolvedPath.startsWith(PUBLIC_DIR)) {
+    writeText(res, 403, "Forbidden");
+    return;
+  }
+  if (!fs.existsSync(resolvedPath) || fs.statSync(resolvedPath).isDirectory()) {
+    writeText(res, 404, "Not found");
+    return;
+  }
+
+  const extension = path.extname(resolvedPath).toLowerCase();
+  const contentType = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".png": "image/png",
+    ".ttf": "font/ttf",
+  }[extension] || "application/octet-stream";
+
+  res.statusCode = 200;
+  res.setHeader("content-type", contentType);
+  res.setHeader("cache-control", "no-store, max-age=0");
+  fs.createReadStream(resolvedPath).pipe(res);
+}
+
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let totalBytes = 0;
+
+    req.on("data", (chunk) => {
+      totalBytes += chunk.length;
+      if (totalBytes > MAX_BODY_BYTES) {
+        reject(new Error("Request body too large"));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+
+    req.on("end", () => {
+      const raw = Buffer.concat(chunks).toString("utf8").trim();
+      if (!raw) {
+        resolve({});
+        return;
+      }
+
+      try {
+        resolve(JSON.parse(raw));
+      } catch {
+        reject(new Error("Invalid JSON body"));
+      }
+    });
+
+    req.on("error", reject);
+  });
+}
+
+function writeJson(res, status, payload) {
+  res.statusCode = status;
+  res.setHeader("content-type", "application/json; charset=utf-8");
+  res.end(JSON.stringify(payload));
+}
+
+function writeText(res, status, text) {
+  res.statusCode = status;
+  res.setHeader("content-type", "text/plain; charset=utf-8");
+  res.end(text);
+}
+
+function readJsonFileSafe(filePath) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function requestIsSecure(req) {
+  const forwardedProto = String(req.headers["x-forwarded-proto"] || "").toLowerCase();
+  return Boolean(req.socket?.encrypted) || forwardedProto === "https";
+}
+
+function parseEnvList(value) {
+  return String(value || "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function pairPayloadForWeb(pairingPayload) {
+  if (!PREFER_LOCAL_RELAY || !pairingPayload || typeof pairingPayload !== "object") {
+    return pairingPayload;
+  }
+
+  const relay = rewriteRelayToLocal(pairingPayload.relay);
+  return {
+    ...pairingPayload,
+    relay,
+  };
+}
+
+function rewriteRelayToLocal(relay) {
+  try {
+    const parsed = new URL(String(relay || ""));
+    parsed.hostname = LOCAL_RELAY_HOST;
+    return parsed.toString().replace(/\/$/, "");
+  } catch {
+    return relay;
+  }
+}
+
+function loadOrCreatePhoneIdentity(stateFile) {
+  if (fs.existsSync(stateFile)) {
+    return JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  }
+
+  const keyPair = generateKeyPairSync("ed25519");
+  const privateJwk = keyPair.privateKey.export({ format: "jwk" });
+  const nextIdentity = {
+    phoneDeviceId: randomUUID(),
+    phoneIdentityPrivateKey: base64UrlToBase64(privateJwk.d),
+    phoneIdentityPublicKey: base64UrlToBase64(privateJwk.x),
+  };
+  fs.writeFileSync(stateFile, JSON.stringify(nextIdentity, null, 2), { mode: 0o600 });
+  return nextIdentity;
+}
+
+function validatePairingPayload(payload) {
+  if (!payload || typeof payload !== "object") {
+    throw new Error("Missing pairing payload");
+  }
+
+  const normalized = {
+    v: Number(payload.v),
+    relay: String(payload.relay || "").trim(),
+    sessionId: String(payload.sessionId || "").trim(),
+    macDeviceId: String(payload.macDeviceId || "").trim(),
+    macIdentityPublicKey: String(payload.macIdentityPublicKey || "").trim(),
+    expiresAt: Number(payload.expiresAt),
+  };
+
+  if (!normalized.relay || !normalized.sessionId || !normalized.macDeviceId || !normalized.macIdentityPublicKey) {
+    throw new Error("Pairing payload is incomplete");
+  }
+  if (!Number.isFinite(normalized.expiresAt)) {
+    throw new Error("Pairing payload expiresAt is invalid");
+  }
+  if (Date.now() > normalized.expiresAt) {
+    throw new Error("This pairing QR has expired. Generate a new one from the bridge.");
+  }
+
+  return normalized;
+}
+
+function approvalPolicyCandidates(accessMode) {
+  return accessMode === "on-request" ? ["on-request", "onRequest"] : ["never"];
+}
+
+function sandboxLegacyValue(accessMode) {
+  return accessMode === "on-request" ? "workspace-write" : "danger-full-access";
+}
+
+function runtimeSandboxPolicyObject(accessMode) {
+  if (accessMode === "on-request") {
+    return {
+      type: "workspaceWrite",
+      networkAccess: true,
+    };
+  }
+
+  return {
+    type: "dangerFullAccess",
+  };
+}
+
+function shouldRetryWithApprovalPolicyFallback(error) {
+  const rpcError = extractRpcError(error);
+  if (!rpcError || (rpcError.code !== -32600 && rpcError.code !== -32602)) {
+    return false;
+  }
+  const message = rpcError.message.toLowerCase();
+  return message.includes("approval")
+    || message.includes("unknown variant")
+    || message.includes("expected one of")
+    || message.includes("onrequest")
+    || message.includes("on-request");
+}
+
+function shouldFallbackFromSandboxPolicy(error) {
+  const rpcError = extractRpcError(error);
+  if (!rpcError || (rpcError.code !== -32600 && rpcError.code !== -32602)) {
+    return false;
+  }
+  const message = rpcError.message.toLowerCase();
+  if (message.includes("thread not found") || message.includes("unknown thread")) {
+    return false;
+  }
+  return message.includes("invalid params")
+    || message.includes("invalid param")
+    || message.includes("unknown field")
+    || message.includes("unexpected field")
+    || message.includes("unrecognized field")
+    || message.includes("failed to parse")
+    || message.includes("unsupported");
+}
+
+function shouldRetryInitializeWithoutCapabilities(error) {
+  const rpcError = extractRpcError(error);
+  if (!rpcError || (rpcError.code !== -32600 && rpcError.code !== -32602)) {
+    return false;
+  }
+  const message = rpcError.message.toLowerCase();
+  return message.includes("capabilities")
+    || message.includes("experimentalapi")
+    || message.includes("experimental api")
+    || message.includes("unknown field")
+    || message.includes("invalid");
+}
+
+function shouldIgnoreThreadResumeFailure(error) {
+  const rpcError = extractRpcError(error);
+  if (!rpcError) {
+    return false;
+  }
+  const message = rpcError.message.toLowerCase();
+  return message.includes("already resumed")
+    || message.includes("not materialized")
+    || message.includes("thread not found")
+    || message.includes("no rollout found");
+}
+
+function extractRpcError(error) {
+  return error && error.rpcError ? error.rpcError : null;
+}
+
+function toRpcError(rpcError) {
+  const error = new Error(rpcError.message || "RPC error");
+  error.rpcError = {
+    code: Number(rpcError.code),
+    message: String(rpcError.message || "RPC error"),
+    data: rpcError.data || null,
+  };
+  return error;
+}
+
+function isApprovalRequestMethod(method) {
+  const normalized = String(method || "").trim();
+  return normalized === "item/commandExecution/requestApproval"
+    || normalized === "item/command_execution/request_approval";
+}
+
+function openWebSocket(url, options) {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(url, options);
+    const cleanup = () => {
+      socket.off("open", onOpen);
+      socket.off("error", onError);
+    };
+    const onOpen = () => {
+      cleanup();
+      resolve(socket);
+    };
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+    socket.once("open", onOpen);
+    socket.once("error", onError);
+  });
+}
+
+function decodeThreadSummary(threadObject) {
+  if (!threadObject || typeof threadObject !== "object") {
+    return null;
+  }
+
+  const title = stringOrEmpty(threadObject.name)
+    || normalizeThreadTitle(threadObject.title)
+    || stringOrEmpty(threadObject.preview)
+    || "New Thread";
+
+  return {
+    id: stringOrEmpty(threadObject.id),
+    title,
+    preview: stringOrEmpty(threadObject.preview),
+    cwd: stringOrEmpty(threadObject.cwd || threadObject.current_working_directory || threadObject.working_directory),
+    updatedAt: threadObject.updatedAt || threadObject.updated_at || null,
+    createdAt: threadObject.createdAt || threadObject.created_at || null,
+    model: stringOrEmpty(threadObject.model),
+  };
+}
+
+function decodeThreadMessages(threadId, threadObject) {
+  const turns = Array.isArray(threadObject.turns) ? threadObject.turns : [];
+  const baseTimestamp = decodeTimestamp(
+    threadObject.createdAt || threadObject.created_at || threadObject.updatedAt || threadObject.updated_at
+  ) || new Date(0);
+
+  let offsetMs = 0;
+  const messages = [];
+
+  for (const turn of turns) {
+    if (!turn || typeof turn !== "object") {
+      continue;
+    }
+
+    const turnId = stringOrEmpty(turn.id);
+    const turnTimestamp = decodeTimestamp(turn.createdAt || turn.created_at || turn.updatedAt || turn.updated_at);
+    const items = Array.isArray(turn.items) ? turn.items : [];
+
+    for (const item of items) {
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+
+      const itemType = normalizeItemType(item.type);
+      const createdAt = decodeTimestamp(item.createdAt || item.created_at || item.updatedAt || item.updated_at)
+        || turnTimestamp
+        || new Date(baseTimestamp.getTime() + offsetMs);
+      offsetMs += 1;
+
+      const itemId = stringOrEmpty(item.id) || `${turnId || "turn"}-${messages.length}`;
+      const text = decodeItemText(item);
+      const message = {
+        id: itemId,
+        threadId,
+        turnId,
+        kind: "chat",
+        role: "system",
+        text,
+        createdAt: createdAt.toISOString(),
+      };
+
+      switch (itemType) {
+      case "usermessage":
+        message.role = "user";
+        break;
+      case "agentmessage":
+      case "assistantmessage":
+        message.role = "assistant";
+        break;
+      case "message":
+        message.role = String(item.role || "").toLowerCase().includes("user") ? "user" : "assistant";
+        break;
+      case "reasoning":
+        message.kind = "thinking";
+        message.text = decodeReasoningItemText(item);
+        break;
+      case "toolcall":
+        message.kind = "tool";
+        message.text = decodeToolCallItemText(item);
+        break;
+      case "commandexecution":
+        message.kind = "command";
+        message.text = decodeCommandExecutionItemText(item);
+        break;
+      case "filechange":
+      case "diff":
+        message.kind = "file";
+        message.text = decodeFileChangeItemText(item);
+        break;
+      case "plan":
+        message.kind = "plan";
+        message.text = decodePlanItemText(item);
+        break;
+      default:
+        if (!text) {
+          continue;
+        }
+        break;
+      }
+
+      if (!message.text.trim()) {
+        continue;
+      }
+
+      messages.push(message);
+    }
+  }
+
+  return messages.sort((left, right) => {
+    if (left.createdAt === right.createdAt) {
+      return left.id.localeCompare(right.id);
+    }
+    return left.createdAt.localeCompare(right.createdAt);
+  });
+}
+
+function decodeItemText(itemObject) {
+  const contentItems = Array.isArray(itemObject.content) ? itemObject.content : [];
+  const textParts = [];
+
+  for (const part of contentItems) {
+    if (!part || typeof part !== "object") {
+      continue;
+    }
+    const partType = normalizeItemType(part.type);
+    if (partType === "text" || partType === "inputtext" || partType === "outputtext" || partType === "message") {
+      if (stringOrEmpty(part.text)) {
+        textParts.push(String(part.text));
+      }
+      continue;
+    }
+
+    if (partType === "skill") {
+      const skillId = stringOrEmpty(part.id) || stringOrEmpty(part.name);
+      if (skillId) {
+        textParts.push(`$${skillId}`);
+      }
+      continue;
+    }
+
+    if (partType === "text" && part.data && typeof part.data === "object" && stringOrEmpty(part.data.text)) {
+      textParts.push(String(part.data.text));
+    }
+  }
+
+  const joined = textParts.join("\n").trim();
+  if (joined) {
+    return joined;
+  }
+
+  return stringOrEmpty(itemObject.text) || stringOrEmpty(itemObject.message);
+}
+
+function decodeReasoningItemText(itemObject) {
+  return decodeItemText(itemObject) || "Reasoning";
+}
+
+function decodeToolCallItemText(itemObject) {
+  const toolName = stringOrEmpty(itemObject.toolName || itemObject.tool_name || itemObject.name);
+  const status = stringOrEmpty(itemObject.status);
+  const base = toolName ? `Tool: ${toolName}` : "Tool activity";
+  return status ? `${base} (${status})` : base;
+}
+
+function decodeCommandExecutionItemText(itemObject) {
+  const command = stringOrEmpty(itemObject.command) || decodeItemText(itemObject);
+  const status = stringOrEmpty(itemObject.status);
+  if (command && status) {
+    return `$ ${command}\n${status}`;
+  }
+  if (command) {
+    return `$ ${command}`;
+  }
+  return "Command execution";
+}
+
+function decodeFileChangeItemText(itemObject) {
+  return decodeItemText(itemObject) || "File change";
+}
+
+function decodePlanItemText(itemObject) {
+  return decodeItemText(itemObject) || "Plan updated";
+}
+
+function normalizeItemType(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_\-\s]/g, "");
+}
+
+function normalizeThreadTitle(value) {
+  const trimmed = stringOrEmpty(value);
+  if (!trimmed || trimmed === "Conversation" || trimmed === "New Thread") {
+    return "";
+  }
+  return trimmed;
+}
+
+function stringOrEmpty(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function decodeTimestamp(rawValue) {
+  if (typeof rawValue === "number" && Number.isFinite(rawValue)) {
+    const milliseconds = rawValue > 10_000_000_000 ? rawValue : rawValue * 1000;
+    return new Date(milliseconds);
+  }
+
+  if (typeof rawValue === "string") {
+    const parsed = Date.parse(rawValue);
+    if (Number.isFinite(parsed)) {
+      return new Date(parsed);
+    }
+  }
+
+  return null;
+}
+
+function encryptEnvelopePayload(payloadObject, key, sender, counter, sessionId, keyEpoch) {
+  const nonce = nonceForDirection(sender, counter);
+  const cipher = createCipheriv("aes-256-gcm", key, nonce);
+  const ciphertext = Buffer.concat([
+    cipher.update(Buffer.from(JSON.stringify(payloadObject), "utf8")),
+    cipher.final(),
+  ]);
+  const tag = cipher.getAuthTag();
+
+  return {
+    kind: "encryptedEnvelope",
+    v: SECURE_PROTOCOL_VERSION,
+    sessionId,
+    keyEpoch,
+    sender,
+    counter,
+    ciphertext: ciphertext.toString("base64"),
+    tag: tag.toString("base64"),
+  };
+}
+
+function decryptEnvelopeBuffer(envelope, key, sender, counter) {
+  try {
+    const nonce = nonceForDirection(sender, counter);
+    const decipher = createDecipheriv("aes-256-gcm", key, nonce);
+    decipher.setAuthTag(base64ToBuffer(envelope.tag));
+    return Buffer.concat([
+      decipher.update(base64ToBuffer(envelope.ciphertext)),
+      decipher.final(),
+    ]);
+  } catch {
+    return null;
+  }
+}
+
+function deriveAesKey(sharedSecret, salt, infoLabel) {
+  return Buffer.from(hkdfSync("sha256", sharedSecret, salt, Buffer.from(infoLabel, "utf8"), 32));
+}
+
+function signTranscript(privateKeyBase64, publicKeyBase64, transcriptBytes) {
+  const signature = sign(
+    null,
+    transcriptBytes,
+    createPrivateKey({
+      key: {
+        crv: "Ed25519",
+        d: base64ToBase64Url(privateKeyBase64),
+        kty: "OKP",
+        x: base64ToBase64Url(publicKeyBase64),
+      },
+      format: "jwk",
+    })
+  );
+  return signature.toString("base64");
+}
+
+function verifyTranscript(publicKeyBase64, transcriptBytes, signatureBase64) {
+  try {
+    return verify(
+      null,
+      transcriptBytes,
+      createPublicKey({
+        key: {
+          crv: "Ed25519",
+          kty: "OKP",
+          x: base64ToBase64Url(publicKeyBase64),
+        },
+        format: "jwk",
+      }),
+      base64ToBuffer(signatureBase64)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function buildTranscriptBytes({
+  sessionId,
+  protocolVersion,
+  handshakeMode,
+  keyEpoch,
+  macDeviceId,
+  phoneDeviceId,
+  macIdentityPublicKey,
+  phoneIdentityPublicKey,
+  macEphemeralPublicKey,
+  phoneEphemeralPublicKey,
+  clientNonce,
+  serverNonce,
+  expiresAtForTranscript,
+}) {
+  return Buffer.concat([
+    encodeLengthPrefixedUTF8(HANDSHAKE_TAG),
+    encodeLengthPrefixedUTF8(sessionId),
+    encodeLengthPrefixedUTF8(String(protocolVersion)),
+    encodeLengthPrefixedUTF8(handshakeMode),
+    encodeLengthPrefixedUTF8(String(keyEpoch)),
+    encodeLengthPrefixedUTF8(macDeviceId),
+    encodeLengthPrefixedUTF8(phoneDeviceId),
+    encodeLengthPrefixedBuffer(base64ToBuffer(macIdentityPublicKey)),
+    encodeLengthPrefixedBuffer(base64ToBuffer(phoneIdentityPublicKey)),
+    encodeLengthPrefixedBuffer(base64ToBuffer(macEphemeralPublicKey)),
+    encodeLengthPrefixedBuffer(base64ToBuffer(phoneEphemeralPublicKey)),
+    encodeLengthPrefixedBuffer(clientNonce),
+    encodeLengthPrefixedBuffer(serverNonce),
+    encodeLengthPrefixedUTF8(String(expiresAtForTranscript)),
+  ]);
+}
+
+function encodeLengthPrefixedUTF8(value) {
+  return encodeLengthPrefixedBuffer(Buffer.from(String(value), "utf8"));
+}
+
+function encodeLengthPrefixedBuffer(buffer) {
+  const lengthBuffer = Buffer.allocUnsafe(4);
+  lengthBuffer.writeUInt32BE(buffer.length, 0);
+  return Buffer.concat([lengthBuffer, buffer]);
+}
+
+function nonceForDirection(sender, counter) {
+  const nonce = Buffer.alloc(12, 0);
+  nonce.writeUInt8(sender === SECURE_SENDER_MAC ? 1 : 2, 0);
+  let value = BigInt(counter);
+  for (let index = 11; index >= 1; index -= 1) {
+    nonce[index] = Number(value & 0xffn);
+    value >>= 8n;
+  }
+  return nonce;
+}
+
+function base64ToBuffer(value) {
+  return Buffer.from(String(value || ""), "base64");
+}
+
+function base64UrlToBase64(value) {
+  const raw = String(value || "");
+  const padded = `${raw}${"=".repeat((4 - (raw.length % 4 || 4)) % 4)}`;
+  return padded.replace(/-/g, "+").replace(/_/g, "/");
+}
+
+function base64ToBase64Url(value) {
+  return String(value || "").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function safeParseJSON(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function rejectControlWaiters(waiters, error) {
+  for (const waiter of [...waiters]) {
+    clearTimeout(waiter.timeout);
+    waiter.reject(error);
+    waiters.delete(waiter);
+  }
+}

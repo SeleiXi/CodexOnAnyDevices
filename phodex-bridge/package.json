@@ -1,0 +1,32 @@
+{
+  "name": "remodex",
+  "version": "1.3.7",
+  "description": "Local bridge between Codex and the Remodex mobile app. Run `remodex up` to start.",
+  "main": "src/index.js",
+  "bin": {
+    "remodex": "./bin/remodex.js"
+  },
+  "files": [
+    "bin/",
+    "src/"
+  ],
+  "scripts": {
+    "start": "node ./bin/remodex.js up",
+    "test": "node --test ./test/*.test.js",
+    "prepack": "node ./scripts/prepare-private-defaults.js",
+    "postpack": "node ./scripts/cleanup-private-defaults.js"
+  },
+  "keywords": [
+    "remodex",
+    "codex",
+    "bridge",
+    "cli"
+  ],
+  "author": "Emanuele Di Pietro",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "qrcode-terminal": "^0.12.0",
+    "ws": "^8.19.0"
+  }
+}
