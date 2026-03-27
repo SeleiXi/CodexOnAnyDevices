@@ -14,7 +14,6 @@ const state = {
   isDisconnecting: false,
   availableModels: [],
   selectedModelId: "",
-  pinnedThreadIds: [],
   threads: [],
   searchQuery: "",
   activeThreadId: "",
@@ -53,7 +52,6 @@ const elements = {
   newThreadButton: document.querySelector("#new-thread-button"),
   threadTitle: document.querySelector("#thread-title"),
   threadSubtitle: document.querySelector("#thread-subtitle"),
-  threadPinButton: document.querySelector("#thread-pin-button"),
   connectionBadge: document.querySelector("#connection-badge"),
   statusBanner: document.querySelector("#status-banner"),
   statusBannerTitle: document.querySelector("#status-banner-title"),
@@ -134,7 +132,6 @@ function bindEvents() {
   elements.statusBannerAction.addEventListener("click", handleBannerAction);
   elements.composerForm.addEventListener("submit", sendMessage);
   elements.modelButton.addEventListener("click", toggleModelMenu);
-  elements.threadPinButton.addEventListener("click", toggleActiveThreadPin);
   elements.accessModeButton.addEventListener("click", toggleAccessModeMenu);
   elements.accessModeOptions.forEach((button) => {
     button.addEventListener("click", handleAccessModeOptionSelect);
@@ -222,7 +219,6 @@ function leaveAuthenticatedMode(message = "") {
   state.autoConnectAttempted = false;
   state.availableModels = [];
   state.selectedModelId = "";
-  state.pinnedThreadIds = [];
   state.threads = [];
   state.activeThreadId = "";
   state.activeThread = null;
@@ -434,10 +430,8 @@ async function refreshRuntimeConfig() {
     const response = await api("/api/runtime-config");
     state.availableModels = response.models || [];
     state.selectedModelId = response.preferences?.selectedModelId || "";
-    state.pinnedThreadIds = response.preferences?.pinnedThreadIds || [];
     renderComposerMeta();
     renderThreads();
-    renderThreadActions();
   } catch (error) {
     showAppError(error.message);
   }
@@ -533,7 +527,6 @@ async function disconnectBridge() {
     state.messages = [];
     renderMessages();
     await refreshStatus();
-    renderThreadActions();
   } catch (error) {
     showAppError(error.message);
   } finally {
@@ -798,7 +791,17 @@ function renderThreads() {
           <span class="thread-title-text">${escapeHTML(thread.title || "New Chat")}</span>
           <span class="thread-time">${escapeHTML(compactRelativeTime(thread.updatedAt || thread.createdAt))}</span>
         </div>
-        <span class="thread-subcopy">${escapeHTML(describeThreadRow(thread))}</span>
+        <div class="thread-row-footer">
+          <span class="thread-subcopy">${escapeHTML(describeThreadRow(thread))}</span>
+          <button
+            type="button"
+            class="thread-pin-indicator ${thread.pinned ? "is-pinned" : ""}"
+            aria-label="${thread.pinned ? "Pinned in Codex" : "Not pinned in Codex"}"
+            title="${thread.pinned ? "Pinned in Codex" : "Not pinned in Codex"}"
+            tabindex="-1"
+            disabled
+          >📌</button>
+        </div>
       `;
       button.addEventListener("click", async () => {
         state.activeThreadId = thread.id;
@@ -822,7 +825,6 @@ function renderMessages() {
   elements.threadSubtitle.textContent = activeThread
     ? describeActiveThreadSubtitle(activeThread)
     : "Choose a conversation or start a new chat.";
-  renderThreadActions();
 
   elements.homeState.hidden = Boolean(state.activeThreadId);
   elements.messageList.hidden = !state.activeThreadId;
@@ -990,15 +992,6 @@ function renderModelMenu() {
   }
 }
 
-function renderThreadActions() {
-  const hasActiveThread = Boolean(state.activeThreadId);
-  const isPinned = hasActiveThread && isPinnedThread(state.activeThreadId);
-  elements.threadPinButton.hidden = !hasActiveThread;
-  elements.threadPinButton.disabled = !hasActiveThread;
-  elements.threadPinButton.textContent = isPinned ? "Pinned" : "Pin";
-  elements.threadPinButton.classList.toggle("is-active", isPinned);
-}
-
 function isAccessModeMenuOpen() {
   return Boolean(elements.accessModeMenu && !elements.accessModeMenu.hidden);
 }
@@ -1072,23 +1065,6 @@ function handleGlobalClick(event) {
   closeComposerMenus();
 }
 
-async function toggleActiveThreadPin() {
-  if (!state.activeThreadId) {
-    return;
-  }
-
-  const nextPinnedThreadIDs = new Set(state.pinnedThreadIds);
-  if (nextPinnedThreadIDs.has(state.activeThreadId)) {
-    nextPinnedThreadIDs.delete(state.activeThreadId);
-  } else {
-    nextPinnedThreadIDs.add(state.activeThreadId);
-  }
-
-  await savePreferences({
-    pinnedThreadIds: [...nextPinnedThreadIDs],
-  });
-}
-
 async function setSelectedModel(modelId) {
   await savePreferences({
     selectedModelId: String(modelId || "").trim(),
@@ -1102,10 +1078,8 @@ async function savePreferences(nextPreferences) {
       body: nextPreferences,
     });
     state.selectedModelId = response.preferences?.selectedModelId || "";
-    state.pinnedThreadIds = response.preferences?.pinnedThreadIds || [];
     renderComposerMeta();
     renderThreads();
-    renderThreadActions();
   } catch (error) {
     showAppError(error.message);
   }
@@ -1321,13 +1295,9 @@ function isSelectedModelOption(modelId) {
     : !String(modelId || "").trim();
 }
 
-function isPinnedThread(threadId) {
-  return state.pinnedThreadIds.includes(threadId);
-}
-
 function prioritizeThreads(threads) {
   return [...threads].sort((left, right) => {
-    const pinPriority = Number(isPinnedThread(right.id)) - Number(isPinnedThread(left.id));
+    const pinPriority = Number(Boolean(right.pinned)) - Number(Boolean(left.pinned));
     if (pinPriority !== 0) {
       return pinPriority;
     }
@@ -1336,10 +1306,10 @@ function prioritizeThreads(threads) {
 }
 
 function groupThreads(threads) {
-  const pinnedThreads = prioritizeThreads(threads.filter((thread) => isPinnedThread(thread.id)));
+  const pinnedThreads = prioritizeThreads(threads.filter((thread) => thread.pinned));
   const groups = new Map();
   for (const thread of threads) {
-    if (isPinnedThread(thread.id)) {
+    if (thread.pinned) {
       continue;
     }
     const cwd = String(thread.cwd || "").trim();

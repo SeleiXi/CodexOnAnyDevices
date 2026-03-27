@@ -918,9 +918,6 @@ async function handleApiRequest(req, res, url) {
       ...(Object.prototype.hasOwnProperty.call(body, "selectedModelId")
         ? { selectedModelId: body.selectedModelId }
         : {}),
-      ...(Object.prototype.hasOwnProperty.call(body, "pinnedThreadIds")
-        ? { pinnedThreadIds: body.pinnedThreadIds }
-        : {}),
     };
 
     writeJson(res, 200, {
@@ -1116,17 +1113,9 @@ function writeUiPreferences(nextPreferences) {
 
 function normalizeUiPreferences(value) {
   const objectValue = value && typeof value === "object" ? value : {};
-  const pinnedThreadIds = Array.from(
-    new Set(
-      (Array.isArray(objectValue.pinnedThreadIds) ? objectValue.pinnedThreadIds : [])
-        .map((threadId) => String(threadId || "").trim())
-        .filter(Boolean)
-    )
-  );
   const selectedModelId = String(objectValue.selectedModelId || "").trim();
 
   return {
-    pinnedThreadIds,
     selectedModelId,
   };
 }
@@ -1343,6 +1332,7 @@ function decodeThreadSummary(threadObject) {
     updatedAt: threadObject.updatedAt || threadObject.updated_at || null,
     createdAt: threadObject.createdAt || threadObject.created_at || null,
     model: stringOrEmpty(threadObject.model),
+    pinned: decodePinnedThreadState(threadObject),
   };
 }
 
@@ -1364,6 +1354,80 @@ function decodeModelOption(modelObject) {
     description: stringOrEmpty(modelObject.description),
     isDefault: Boolean(modelObject.isDefault ?? modelObject.is_default),
   };
+}
+
+function decodePinnedThreadState(threadObject) {
+  const directCandidates = [
+    threadObject.pinned,
+    threadObject.isPinned,
+    threadObject.is_pinned,
+    threadObject.pin,
+  ];
+  for (const candidate of directCandidates) {
+    const resolved = decodeBooleanLike(candidate);
+    if (resolved !== null) {
+      return resolved;
+    }
+  }
+
+  const metadata = threadObject.metadata && typeof threadObject.metadata === "object"
+    ? threadObject.metadata
+    : null;
+  if (!metadata) {
+    return false;
+  }
+
+  const metadataCandidates = [
+    metadata.pinned,
+    metadata.isPinned,
+    metadata.is_pinned,
+    metadata.pin,
+    metadata.pinnedThread,
+    metadata.pinned_thread,
+  ];
+  for (const candidate of metadataCandidates) {
+    const resolved = decodeBooleanLike(candidate);
+    if (resolved !== null) {
+      return resolved;
+    }
+  }
+
+  if (metadata.pinnedAt != null || metadata.pinned_at != null) {
+    return true;
+  }
+
+  return false;
+}
+
+function decodeBooleanLike(value) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes"].includes(normalized)) {
+      return true;
+    }
+    if (["false", "0", "no"].includes(normalized)) {
+      return false;
+    }
+    return null;
+  }
+  if (value && typeof value === "object") {
+    if (typeof value.boolValue === "boolean") {
+      return value.boolValue;
+    }
+    if (typeof value.value === "boolean") {
+      return value.value;
+    }
+    if (typeof value.value === "string") {
+      return decodeBooleanLike(value.value);
+    }
+  }
+  return null;
 }
 
 function decodeThreadMessages(threadId, threadObject) {

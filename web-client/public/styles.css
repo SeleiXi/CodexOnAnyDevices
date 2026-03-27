@@ -315,13 +315,6 @@ select:focus {
   color: var(--text);
 }
 
-.toolbar-button.is-active,
-.ghost-button.is-active {
-  background: rgba(15, 23, 32, 0.12);
-  border-color: rgba(15, 23, 32, 0.12);
-  font-weight: 600;
-}
-
 .compact {
   min-height: 40px;
   padding: 10px 14px;
@@ -653,6 +646,37 @@ button:disabled {
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.thread-row-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.thread-row-footer .thread-subcopy {
+  flex: 1;
+  min-width: 0;
+}
+
+.thread-pin-indicator {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 999px;
+  background: transparent;
+  opacity: 0.2;
+  font-size: 0.82rem;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.thread-pin-indicator.is-pinned {
+  opacity: 0.9;
 }
 
 .thread-empty {
