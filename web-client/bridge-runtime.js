@@ -5,6 +5,7 @@ const path = require("path");
 const { spawn, spawnSync } = require("child_process");
 const { URL } = require("url");
 
+const ROOT_DIR = __dirname;
 const STARTUP_TIMEOUT_MS = 30_000;
 const HEALTHCHECK_INTERVAL_MS = 500;
 const MIN_PAIRING_TTL_MS = 30_000;
@@ -22,7 +23,9 @@ function createBridgeRuntimeManager({
   }
 
   const scriptPath = path.join(repoDir, "run-local-remodex.sh");
+  const windowsLauncherPath = path.join(ROOT_DIR, "windows-runtime-launcher.js");
   const logFile = path.join(stateDir, "bridge-runtime.log");
+  const runtimeProcessFile = path.join(stateDir, "bridge-runtime-process.json");
   let startPromise = null;
 
   async function ensureFreshPairing({
@@ -51,19 +54,34 @@ function createBridgeRuntimeManager({
       defaultPort,
     });
 
+    stopExistingRuntime({
+      runtimeProcessFile,
+    });
     stopRuntimeOnPort(runtimeConfig.port);
 
     const logStartOffset = fs.existsSync(logFile) ? fs.statSync(logFile).size : 0;
     const logFd = fs.openSync(logFile, "a", 0o600);
-    const child = spawn(
+    const launcher = runtimeLauncherCommand(process.platform, {
       scriptPath,
-      ["--hostname", runtimeConfig.hostname, "--port", String(runtimeConfig.port)],
+      windowsLauncherPath,
+    });
+    const child = spawn(
+      launcher.command,
+      launcher.args.concat(["--hostname", runtimeConfig.hostname, "--port", String(runtimeConfig.port)]),
       {
         cwd: repoDir,
         detached: true,
         stdio: ["ignore", logFd, logFd],
       }
     );
+
+    if (process.platform === "win32" && Number.isFinite(child.pid) && child.pid > 0) {
+      fs.writeFileSync(runtimeProcessFile, JSON.stringify({
+        pid: child.pid,
+        port: runtimeConfig.port,
+        startedAt: Date.now(),
+      }, null, 2));
+    }
 
     child.unref();
 
@@ -162,6 +180,7 @@ function resolveRuntimeConfig({
     process.env.REMODEX_WEB_BRIDGE_HOSTNAME
       || relayUrl?.hostname
       || defaultHostname
+      || inferPlatformDefaultHostname()
       || ""
   ).trim();
   const port = Number.parseInt(
@@ -254,10 +273,75 @@ function pairingNeedsRefresh(pairingPayload, now = Date.now()) {
     || Number(pairingPayload.expiresAt) <= (now + MIN_PAIRING_TTL_MS);
 }
 
+function inferPlatformDefaultHostname() {
+  if (process.platform !== "win32") {
+    return "";
+  }
+  // On Windows the browser client talks to the bridge through the local web
+  // server, so loopback is the safest default unless the user explicitly
+  // provides a LAN hostname for phone pairing.
+  return "127.0.0.1";
+}
+
+function runtimeLauncherCommand(platform, {
+  scriptPath,
+  windowsLauncherPath,
+}) {
+  if (platform === "win32") {
+    return {
+      command: process.execPath,
+      args: [windowsLauncherPath],
+    };
+  }
+
+  return {
+    command: scriptPath,
+    args: [],
+  };
+}
+
+function stopExistingRuntime({
+  runtimeProcessFile,
+}) {
+  if (process.platform !== "win32") {
+    return;
+  }
+
+  const runtimeState = readJsonFileSafe(runtimeProcessFile);
+  const pid = Number(runtimeState?.pid || 0);
+  if (Number.isFinite(pid) && pid > 0) {
+    spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], {
+      stdio: "ignore",
+    });
+  }
+
+  try {
+    fs.unlinkSync(runtimeProcessFile);
+  } catch {
+    // best effort
+  }
+}
+
 function stopRuntimeOnPort(port) {
   if (!Number.isFinite(port) || port <= 0) {
     return;
   }
+
+  if (process.platform === "win32") {
+    const script = `
+$connections = Get-NetTCPConnection -LocalPort ${Math.floor(port)} -State Listen -ErrorAction SilentlyContinue
+if ($connections) {
+  $connections | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object {
+    Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue
+  }
+}
+`;
+    spawnSync("powershell", ["-NoProfile", "-Command", script], {
+      stdio: "ignore",
+    });
+    return;
+  }
+
   spawnSync("bash", ["-lc", `fuser -k ${Math.floor(port)}/tcp >/dev/null 2>&1 || true`], {
     stdio: "ignore",
   });
@@ -288,6 +372,14 @@ function readLogSinceOffset(filePath, offset) {
     return content.slice(offset);
   } catch {
     return "";
+  }
+}
+
+function readJsonFileSafe(filePath) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return null;
   }
 }
 
