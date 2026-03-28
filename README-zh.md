@@ -4,7 +4,7 @@
 
 RemodexOnAnyDevices 是 [remodex](https://github.com/Emanuele-web04/remodex) 的跨平台版本（Web端）。让你可以一边在外健身一边vibe coding，或者在你的windows上也可以用codex-app来操作你远程linux服务器的项目（官方 Codex app 目前并不直接支持让你在你的windows机器上用codex跑你一个在服务器上的project）。
 
-此外，原版只支持iPhone在App Store下载，RemodexOnAnyDevices让你可以在任何手机使用，且原版对Windows/Linux部署的兼容性较差，RemodexOnAnyDevices在这方面专门做了一些优化。
+此外，原版只支持iPhone使用，RemodexOnAnyDevices让你可以在任何手机使用，且原版对Windows/Linux部署的兼容性较差，RemodexOnAnyDevices在这方面专门做了一些优化。
 
 上游项目的 ISC License 保留在 [LICENSE](LICENSE) 中。
 
