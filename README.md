@@ -143,3 +143,6 @@ The web client is intended for local administration and chat access against your
 - it now includes a mobile-oriented chat layout instead of a desktop-only squeeze-down
 
 See [web-client/README.md](web-client/README.md) for details.
+
+## Others
+The project is promoted on and acknowledge [v2ex](v2ex.com) and [linux.do](linux.do)
