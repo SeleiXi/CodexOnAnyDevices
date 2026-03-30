@@ -987,6 +987,176 @@ button:disabled {
   font-family: var(--font-mono);
 }
 
+.message-card-header,
+.approval-detail-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.message-card-header {
+  color: var(--muted);
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.message-kind,
+.approval-detail-label {
+  font-weight: 600;
+}
+
+.message-time {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.plan-explanation {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.55;
+}
+
+.plan-step-list {
+  display: grid;
+  gap: 8px;
+}
+
+.plan-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 11px;
+  border-radius: 14px;
+  background: rgba(15, 23, 32, 0.05);
+}
+
+.plan-step-status {
+  flex: 0 0 auto;
+  min-width: 64px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.plan-step.status-completed .plan-step-status {
+  color: #0f766e;
+}
+
+.plan-step.status-in-progress .plan-step-status {
+  color: #1d4ed8;
+}
+
+.plan-step.status-pending .plan-step-status {
+  color: var(--muted);
+}
+
+.plan-step-text {
+  font-size: 0.93rem;
+  line-height: 1.45;
+}
+
+.structured-request-form,
+.approval-details,
+.approval-controls {
+  display: grid;
+  gap: 12px;
+}
+
+.prompt-question-card,
+.approval-detail-block {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(15, 23, 32, 0.05);
+}
+
+.prompt-question-header,
+.approval-detail-block {
+  margin: 0;
+}
+
+.prompt-question-header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.prompt-option-list {
+  display: grid;
+  gap: 8px;
+}
+
+.prompt-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(15, 23, 32, 0.06);
+}
+
+.prompt-option span {
+  display: grid;
+  gap: 3px;
+}
+
+.prompt-option strong {
+  font-size: 0.86rem;
+}
+
+.prompt-option small {
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.prompt-free-input,
+.approval-control select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 32, 0.08);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text);
+  font: inherit;
+}
+
+.prompt-free-input {
+  resize: vertical;
+  min-height: 44px;
+}
+
+.approval-control {
+  display: grid;
+  gap: 6px;
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+
+.approval-detail-row span,
+.approval-detail-label {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.approval-detail-row strong {
+  color: var(--text);
+  text-align: right;
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .timeline-empty h3 {
   margin: 0;
   font-size: 1.32rem;
