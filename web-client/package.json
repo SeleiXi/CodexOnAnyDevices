@@ -4,6 +4,7 @@
   "type": "commonjs",
   "scripts": {
     "start": "node ./server.js",
+    "test": "node --test ./test/*.test.js",
     "set-password": "node ./set-password.js"
   },
   "dependencies": {

@@ -940,19 +940,21 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(HTTP_PORT, "0.0.0.0", () => {
-  console.log(`[remodex-web] listening on http://0.0.0.0:${HTTP_PORT}`);
-  if (!auth.hasPasswordConfigured()) {
-    console.warn("[remodex-web] admin password is not configured; run `npm run set-password -- --generate`");
-  }
-  const securitySummary = security.getSummary({
-    headers: {},
-    socket: { remoteAddress: "127.0.0.1" },
+if (require.main === module) {
+  server.listen(HTTP_PORT, "0.0.0.0", () => {
+    console.log(`[remodex-web] listening on http://0.0.0.0:${HTTP_PORT}`);
+    if (!auth.hasPasswordConfigured()) {
+      console.warn("[remodex-web] admin password is not configured; run `npm run set-password -- --generate`");
+    }
+    const securitySummary = security.getSummary({
+      headers: {},
+      socket: { remoteAddress: "127.0.0.1" },
+    });
+    console.log(
+      `[remodex-web] allowlist=${securitySummary.allowlistEnabled ? "on" : "off"} proxy_headers=${securitySummary.trustProxyHeaders ? "trusted" : "direct"}`
+    );
   });
-  console.log(
-    `[remodex-web] allowlist=${securitySummary.allowlistEnabled ? "on" : "off"} proxy_headers=${securitySummary.trustProxyHeaders ? "trusted" : "direct"}`
-  );
-});
+}
 
 async function handleApiRequest(req, res, url) {
   const connection = security.assertRequestAllowed(req);
@@ -2426,3 +2428,17 @@ function rejectControlWaiters(waiters, error) {
     waiters.delete(waiter);
   }
 }
+
+module.exports = {
+  RemodexWebClient,
+  buildTurnStartParams,
+  buildServerRequestResponsePayload,
+  buildStructuredUserInputResponse,
+  decodePlanState,
+  decodePlanSteps,
+  decodeServerRequest,
+  decodeThreadMessages,
+  mergeTransientThreadMessages,
+  shouldRetryTurnStartWithoutCollaborationMode,
+  server,
+};
