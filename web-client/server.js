@@ -61,6 +61,8 @@ class RemodexWebClient {
     this.isInitialized = false;
     this.lastDisconnect = null;
     this.cachedModels = [];
+    this.supportsTurnCollaborationMode = true;
+    this.lastPlanModeDowngrade = null;
   }
 
   status() {
@@ -72,6 +74,7 @@ class RemodexWebClient {
       macDeviceId: this.pairingPayload?.macDeviceId || "",
       phoneDeviceId: this.phoneIdentity.phoneDeviceId,
       pendingApproval: this.pendingApproval,
+      lastPlanModeDowngrade: this.lastPlanModeDowngrade,
       lastDisconnect: this.lastDisconnect,
     };
   }
@@ -84,6 +87,7 @@ class RemodexWebClient {
     this.pendingApproval = null;
     this.lastAppliedBridgeOutboundSeq = 0;
     this.lastDisconnect = null;
+    this.lastPlanModeDowngrade = null;
 
     const relayURL = new URL(`${payload.relay.replace(/\/+$/, "")}/${payload.sessionId}`);
     const socket = await openWebSocket(relayURL.toString(), {
@@ -114,6 +118,7 @@ class RemodexWebClient {
     this.pendingApproval = null;
     this.clearPendingWithoutReject();
     this.secureSession = null;
+    this.lastPlanModeDowngrade = null;
 
     if (!socket) {
       return;
@@ -406,33 +411,53 @@ class RemodexWebClient {
   async startTurn(
     threadId,
     text,
-    { accessMode = "full-access", cwd = "", model = "", effort = "" } = {}
+    {
+      accessMode = "full-access",
+      cwd = "",
+      model = "",
+      effort = "",
+      collaborationMode = null,
+    } = {}
   ) {
     const trimmed = String(text || "").trim();
     if (!trimmed) {
       throw new Error("Message cannot be empty");
     }
 
+    this.lastPlanModeDowngrade = null;
     await this.resumeThread(threadId, { cwd, accessMode, model });
 
-    const params = {
-      threadId,
-      input: [
-        {
-          type: "text",
-          text: trimmed,
-        },
-      ],
-    };
-    if (String(model || "").trim()) {
-      params.model = String(model).trim();
-    }
-    if (String(effort || "").trim()) {
-      params.effort = String(effort).trim();
-    }
+    let includeCollaborationMode = Boolean(
+      collaborationMode
+      && this.supportsTurnCollaborationMode
+      && typeof collaborationMode === "object"
+    );
 
-    const response = await this.sendRequestWithSandboxFallback("turn/start", params, accessMode);
-    return response.result || {};
+    while (true) {
+      const params = buildTurnStartParams({
+        threadId,
+        text: trimmed,
+        model,
+        effort,
+        collaborationMode: includeCollaborationMode ? collaborationMode : null,
+      });
+
+      try {
+        const response = await this.sendRequestWithSandboxFallback("turn/start", params, accessMode);
+        return response.result || {};
+      } catch (error) {
+        if (!includeCollaborationMode || !shouldRetryTurnStartWithoutCollaborationMode(error)) {
+          throw error;
+        }
+
+        includeCollaborationMode = false;
+        this.supportsTurnCollaborationMode = false;
+        this.lastPlanModeDowngrade = {
+          occurredAt: new Date().toISOString(),
+          reason: "Plan mode is not supported by this runtime. The turn was sent as a normal message instead.",
+        };
+      }
+    }
   }
 
   async readThread(threadId) {
@@ -1364,6 +1389,22 @@ function shouldTreatThreadAsEmpty(error) {
     || (message.includes("includeturns") && message.includes("before first user message"));
 }
 
+function shouldRetryTurnStartWithoutCollaborationMode(error) {
+  const rpcError = extractRpcError(error);
+  if (!rpcError || (rpcError.code !== -32600 && rpcError.code !== -32602)) {
+    return false;
+  }
+
+  const message = rpcError.message.toLowerCase();
+  return message.includes("collaborationmode")
+    || message.includes("collaboration mode")
+    || message.includes("experimentalapi")
+    || message.includes("experimental api")
+    || message.includes("plan mode")
+    || message.includes("unknown field")
+    || message.includes("invalid");
+}
+
 function extractRpcError(error) {
   return error && error.rpcError ? error.rpcError : null;
 }
@@ -1376,6 +1417,30 @@ function toRpcError(rpcError) {
     data: rpcError.data || null,
   };
   return error;
+}
+
+function buildTurnStartParams({ threadId, text, model = "", effort = "", collaborationMode = null }) {
+  const params = {
+    threadId,
+    input: [
+      {
+        type: "text",
+        text,
+      },
+    ],
+  };
+
+  if (String(model || "").trim()) {
+    params.model = String(model).trim();
+  }
+  if (String(effort || "").trim()) {
+    params.effort = String(effort).trim();
+  }
+  if (collaborationMode && typeof collaborationMode === "object") {
+    params.collaborationMode = collaborationMode;
+  }
+
+  return params;
 }
 
 function isApprovalRequestMethod(method) {

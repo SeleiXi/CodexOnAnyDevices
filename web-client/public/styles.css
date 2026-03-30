@@ -1039,6 +1039,7 @@ button:disabled {
 
 .composer-model-control,
 .composer-reasoning-control,
+.composer-plan-control,
 .composer-access-control {
   position: relative;
   display: flex;
@@ -1056,6 +1057,17 @@ button:disabled {
 .model-button {
   min-width: 132px;
   justify-content: space-between;
+}
+
+.plan-button {
+  min-width: 108px;
+  justify-content: center;
+}
+
+.plan-button.selected {
+  border-color: rgba(24, 119, 242, 0.22);
+  background: rgba(24, 119, 242, 0.12);
+  box-shadow: 0 10px 24px rgba(24, 119, 242, 0.14);
 }
 
 .access-mode-button strong {

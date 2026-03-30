@@ -15,6 +15,7 @@ const state = {
   availableModels: [],
   selectedModelId: "",
   selectedReasoningEffort: "",
+  planModeArmed: false,
   pinnedThreadIds: [],
   threads: [],
   searchQuery: "",
@@ -80,6 +81,8 @@ const elements = {
   reasoningButton: document.querySelector("#reasoning-button"),
   reasoningMenu: document.querySelector("#reasoning-menu"),
   reasoningSummary: document.querySelector("#reasoning-summary"),
+  planButton: document.querySelector("#plan-button"),
+  planSummary: document.querySelector("#plan-summary"),
   accessModeButton: document.querySelector("#access-mode-button"),
   accessModeMenu: document.querySelector("#access-mode-menu"),
   accessModeSummary: document.querySelector("#access-mode-summary"),
@@ -137,6 +140,7 @@ function bindEvents() {
   elements.composerForm.addEventListener("submit", sendMessage);
   elements.modelButton.addEventListener("click", toggleModelMenu);
   elements.reasoningButton.addEventListener("click", toggleReasoningMenu);
+  elements.planButton.addEventListener("click", togglePlanModeArmed);
   elements.accessModeButton.addEventListener("click", toggleAccessModeMenu);
   elements.accessModeOptions.forEach((button) => {
     button.addEventListener("click", handleAccessModeOptionSelect);
@@ -225,6 +229,7 @@ function leaveAuthenticatedMode(message = "") {
   state.availableModels = [];
   state.selectedModelId = "";
   state.selectedReasoningEffort = "";
+  state.planModeArmed = false;
   state.pinnedThreadIds = [];
   state.threads = [];
   state.activeThreadId = "";
@@ -643,6 +648,7 @@ async function sendMessage(event) {
 
   clearAppError();
   elements.composerInput.disabled = true;
+  const shouldUsePlanMode = state.planModeArmed;
   try {
     if (!state.activeThreadId) {
       await createThreadAndSelect();
@@ -650,6 +656,8 @@ async function sendMessage(event) {
     if (!state.activeThreadId) {
       return;
     }
+
+    const collaborationMode = shouldUsePlanMode ? buildPlanCollaborationModePayload() : undefined;
 
     await api(`/api/threads/${encodeURIComponent(state.activeThreadId)}/turns`, {
       method: "POST",
@@ -659,10 +667,15 @@ async function sendMessage(event) {
         accessMode: elements.accessMode.value,
         model: selectedModelRequestValue(),
         effort: selectedReasoningEffortRequestValue(),
+        collaborationMode,
       },
     });
     elements.composerInput.value = "";
+    if (shouldUsePlanMode) {
+      state.planModeArmed = false;
+    }
     state.forceScrollToBottom = true;
+    renderComposerMeta();
     await refreshActiveThread();
     await refreshThreads();
   } catch (error) {
@@ -967,6 +980,15 @@ function renderBanner() {
     return;
   }
 
+  const lastPlanModeDowngrade = state.status?.lastPlanModeDowngrade || null;
+  if (lastPlanModeDowngrade?.reason) {
+    elements.statusBanner.hidden = false;
+    elements.statusBannerTitle.textContent = "Plan mode was downgraded";
+    elements.statusBannerCopy.textContent = lastPlanModeDowngrade.reason;
+    elements.statusBannerAction.textContent = "Chat";
+    return;
+  }
+
   if (state.appError) {
     elements.statusBanner.hidden = false;
     elements.statusBannerTitle.textContent = "Action failed";
@@ -1014,6 +1036,16 @@ function renderComposerMeta() {
   elements.reasoningButton.setAttribute("aria-label", `Thinking level: ${selectedReasoningLabel}`);
   elements.reasoningButton.disabled = supportedReasoningOptions().length === 0;
   renderReasoningMenu();
+
+  const canPlan = Boolean(resolvePlanModeModelIdentifier());
+  elements.planButton.disabled = !canPlan;
+  elements.planButton.classList.toggle("selected", state.planModeArmed);
+  elements.planButton.setAttribute("aria-pressed", state.planModeArmed ? "true" : "false");
+  elements.planButton.setAttribute(
+    "aria-label",
+    state.planModeArmed ? "Plan mode armed for the next turn" : "Plan mode is off"
+  );
+  elements.planSummary.textContent = state.planModeArmed ? "Plan Next" : "Plan";
 }
 
 function renderModelMenu() {
@@ -1248,6 +1280,10 @@ function handleHomeSecondaryAction() {
 }
 
 function handleBannerAction() {
+  if (!state.status?.pendingApproval && state.status?.lastPlanModeDowngrade?.reason) {
+    setCurrentView("chat");
+    return;
+  }
   setCurrentView("connection");
 }
 
@@ -1493,6 +1529,43 @@ function reasoningDisplayTitle(effort) {
 
 function activeReasoningDisplayTitle() {
   return reasoningDisplayTitle(effectiveReasoningEffort());
+}
+
+function resolvePlanModeModelIdentifier() {
+  const explicitModel = selectedModelRequestValue();
+  if (explicitModel) {
+    return explicitModel;
+  }
+
+  const effectiveModel = effectiveModelOption();
+  return String(effectiveModel?.model || effectiveModel?.id || "").trim() || "";
+}
+
+function buildPlanCollaborationModePayload() {
+  const model = resolvePlanModeModelIdentifier();
+  if (!model) {
+    throw new Error("Plan mode requires an available model before sending.");
+  }
+
+  return {
+    mode: "plan",
+    settings: {
+      model,
+      reasoning_effort: selectedReasoningEffortRequestValue() || null,
+      developer_instructions: null,
+    },
+  };
+}
+
+function togglePlanModeArmed() {
+  if (!resolvePlanModeModelIdentifier()) {
+    showAppError("Plan mode requires an available model before sending.");
+    return;
+  }
+
+  clearAppError();
+  state.planModeArmed = !state.planModeArmed;
+  renderComposerMeta();
 }
 
 function isSelectedReasoningEffort(effort) {
