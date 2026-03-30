@@ -629,6 +629,7 @@ async function refreshActiveThread() {
     const response = await api(`/api/threads/${encodeURIComponent(state.activeThreadId)}`);
     state.activeThread = response.thread;
     state.messages = response.messages || [];
+    clearAppError();
     renderMessages();
     renderThreads();
   } catch (error) {

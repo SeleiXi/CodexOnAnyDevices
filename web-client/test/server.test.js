@@ -124,6 +124,51 @@ test("startTurn retries once without collaboration mode when the runtime rejects
   assert.match(client.lastPlanModeDowngrade.reason, /Plan mode is not supported/);
 });
 
+test("readThread falls back when includeTurns hits a transient empty rollout", async () => {
+  const client = createClientStub();
+  const requests = [];
+
+  client.sendRequest = async (method, params) => {
+    requests.push({ method, params });
+    if (requests.length === 1) {
+      throw rpcError(
+        "failed to load rollout `C:\\Users\\KarsaGuo\\.codex\\sessions\\2026\\03\\30\\rollout-thread-1.jsonl`: rollout at C:\\Users\\KarsaGuo\\.codex\\sessions\\2026\\03\\30\\rollout-thread-1.jsonl is empty",
+        -32000
+      );
+    }
+
+    return {
+      result: {
+        thread: {
+          id: "thread-1",
+          title: "New Thread",
+          createdAt: "2026-03-30T10:00:00.000Z",
+          updatedAt: "2026-03-30T10:00:00.000Z",
+        },
+      },
+    };
+  };
+
+  const result = await client.readThread("thread-1");
+
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[0], {
+    method: "thread/read",
+    params: {
+      threadId: "thread-1",
+      includeTurns: true,
+    },
+  });
+  assert.deepEqual(requests[1], {
+    method: "thread/read",
+    params: {
+      threadId: "thread-1",
+    },
+  });
+  assert.equal(result.thread.id, "thread-1");
+  assert.equal(result.messages.length, 0);
+});
+
 test("routeRpcMessage tracks typed requests, clears resolved requests, and stores notifications", () => {
   const client = createClientStub();
 

@@ -1510,7 +1510,8 @@ function shouldTreatThreadAsEmpty(error) {
   }
   const message = rpcError.message.toLowerCase();
   return message.includes("not materialized")
-    || (message.includes("includeturns") && message.includes("before first user message"));
+    || (message.includes("includeturns") && message.includes("before first user message"))
+    || (message.includes("failed to load rollout") && message.includes("is empty"));
 }
 
 function shouldRetryTurnStartWithoutCollaborationMode(error) {
