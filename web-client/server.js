@@ -403,7 +403,11 @@ class RemodexWebClient {
     }
   }
 
-  async startTurn(threadId, text, { accessMode = "full-access", cwd = "", model = "" } = {}) {
+  async startTurn(
+    threadId,
+    text,
+    { accessMode = "full-access", cwd = "", model = "", effort = "" } = {}
+  ) {
     const trimmed = String(text || "").trim();
     if (!trimmed) {
       throw new Error("Message cannot be empty");
@@ -422,6 +426,9 @@ class RemodexWebClient {
     };
     if (String(model || "").trim()) {
       params.model = String(model).trim();
+    }
+    if (String(effort || "").trim()) {
+      params.effort = String(effort).trim();
     }
 
     const response = await this.sendRequestWithSandboxFallback("turn/start", params, accessMode);
