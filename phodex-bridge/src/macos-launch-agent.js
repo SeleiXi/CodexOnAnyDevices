@@ -33,8 +33,8 @@ const DEFAULT_PAIRING_WAIT_TIMEOUT_MS = 10_000;
 const DEFAULT_PAIRING_WAIT_INTERVAL_MS = 200;
 
 // Runs the bridge inside launchd while keeping QR rendering in the foreground CLI command.
-function runMacOSBridgeService({ env = process.env } = {}) {
-  assertDarwinPlatform();
+function runMacOSBridgeService({ env = process.env, platform = process.platform } = {}) {
+  assertDarwinPlatform(platform);
   const config = readDaemonConfig({ env });
   if (!config?.relayUrl) {
     const message = "No relay URL configured for the macOS bridge service.";
@@ -69,6 +69,7 @@ async function startMacOSBridgeService({
   fsImpl = fs,
   execFileSyncImpl = execFileSync,
   osImpl = os,
+  resolveUidImpl = resolveUid,
   nodePath = process.execPath,
   cliPath = path.resolve(__dirname, "..", "bin", "remodex.js"),
   waitForPairing = false,
@@ -97,6 +98,7 @@ async function startMacOSBridgeService({
     env,
     execFileSyncImpl,
     plistPath,
+    resolveUidImpl,
   });
 
   if (!waitForPairing) {
@@ -124,12 +126,14 @@ function stopMacOSBridgeService({
   platform = process.platform,
   execFileSyncImpl = execFileSync,
   fsImpl = fs,
+  resolveUidImpl = resolveUid,
 } = {}) {
   assertDarwinPlatform(platform);
   bootoutLaunchAgent({
     env,
     execFileSyncImpl,
     ignoreMissing: true,
+    resolveUidImpl,
   });
   clearPairingSession({ env, fsImpl });
   clearBridgeStatus({ env, fsImpl });
@@ -141,6 +145,7 @@ function resetMacOSBridgePairing({
   platform = process.platform,
   execFileSyncImpl = execFileSync,
   fsImpl = fs,
+  resolveUidImpl = resolveUid,
   resetBridgePairingImpl = resetBridgeDeviceState,
 } = {}) {
   assertDarwinPlatform(platform);
@@ -149,6 +154,7 @@ function resetMacOSBridgePairing({
     platform,
     execFileSyncImpl,
     fsImpl,
+    resolveUidImpl,
   });
   return resetBridgePairingImpl();
 }
@@ -158,9 +164,10 @@ function getMacOSBridgeServiceStatus({
   platform = process.platform,
   execFileSyncImpl = execFileSync,
   fsImpl = fs,
+  resolveUidImpl = resolveUid,
 } = {}) {
   assertDarwinPlatform(platform);
-  const launchd = readLaunchAgentState({ env, execFileSyncImpl });
+  const launchd = readLaunchAgentState({ env, execFileSyncImpl, resolveUidImpl });
   return {
     label: SERVICE_LABEL,
     platform: "darwin",
@@ -304,15 +311,17 @@ function restartLaunchAgent({
   env = process.env,
   execFileSyncImpl = execFileSync,
   plistPath,
+  resolveUidImpl = resolveUid,
 } = {}) {
   bootoutLaunchAgent({
     env,
     execFileSyncImpl,
     ignoreMissing: true,
+    resolveUidImpl,
   });
   execFileSyncImpl("launchctl", [
     "bootstrap",
-    launchAgentDomain(env),
+    launchAgentDomain(env, { resolveUidImpl }),
     plistPath,
   ], { stdio: ["ignore", "ignore", "pipe"] });
 }
@@ -321,11 +330,12 @@ function bootoutLaunchAgent({
   env = process.env,
   execFileSyncImpl = execFileSync,
   ignoreMissing = false,
+  resolveUidImpl = resolveUid,
 } = {}) {
   const bootoutTargets = [
     // Some macOS setups only fully unload the agent when bootout targets the plist path.
-    [launchAgentDomain(env), resolveLaunchAgentPlistPath({ env })],
-    [launchAgentLabelDomain(env)],
+    [launchAgentDomain(env, { resolveUidImpl }), resolveLaunchAgentPlistPath({ env })],
+    [launchAgentLabelDomain(env, { resolveUidImpl })],
   ];
   let lastError = null;
 
@@ -350,11 +360,12 @@ function bootoutLaunchAgent({
 function readLaunchAgentState({
   env = process.env,
   execFileSyncImpl = execFileSync,
+  resolveUidImpl = resolveUid,
 } = {}) {
   try {
     const output = execFileSyncImpl("launchctl", [
       "print",
-      launchAgentLabelDomain(env),
+      launchAgentLabelDomain(env, { resolveUidImpl }),
     ], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     return {
       loaded: true,
@@ -391,12 +402,12 @@ function assertRelayConfigured(config) {
   throw new Error("No relay URL configured. Run ./run-local-remodex.sh or set REMODEX_RELAY before enabling the macOS bridge service.");
 }
 
-function launchAgentDomain(env) {
-  return `gui/${resolveUid(env)}`;
+function launchAgentDomain(env, { resolveUidImpl = resolveUid } = {}) {
+  return `gui/${resolveUidImpl(env)}`;
 }
 
-function launchAgentLabelDomain(env) {
-  return `${launchAgentDomain(env)}/${SERVICE_LABEL}`;
+function launchAgentLabelDomain(env, { resolveUidImpl = resolveUid } = {}) {
+  return `${launchAgentDomain(env, { resolveUidImpl })}/${SERVICE_LABEL}`;
 }
 
 function resolveUid(env) {

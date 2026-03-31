@@ -56,11 +56,16 @@ class RemodexWebClient {
     this.pendingControlWaiters = new Set();
     this.pendingRequests = new Map();
     this.pendingApproval = null;
+    this.pendingServerRequest = null;
     this.lastAppliedBridgeOutboundSeq = 0;
     this.isConnected = false;
     this.isInitialized = false;
     this.lastDisconnect = null;
     this.cachedModels = [];
+    this.supportsTurnCollaborationMode = true;
+    this.lastPlanModeDowngrade = null;
+    this.lastModelReroute = null;
+    this.transientPlanStateByThread = new Map();
   }
 
   status() {
@@ -72,6 +77,9 @@ class RemodexWebClient {
       macDeviceId: this.pairingPayload?.macDeviceId || "",
       phoneDeviceId: this.phoneIdentity.phoneDeviceId,
       pendingApproval: this.pendingApproval,
+      pendingServerRequest: this.pendingServerRequest,
+      lastPlanModeDowngrade: this.lastPlanModeDowngrade,
+      lastModelReroute: this.lastModelReroute,
       lastDisconnect: this.lastDisconnect,
     };
   }
@@ -82,8 +90,12 @@ class RemodexWebClient {
 
     this.pairingPayload = payload;
     this.pendingApproval = null;
+    this.pendingServerRequest = null;
     this.lastAppliedBridgeOutboundSeq = 0;
     this.lastDisconnect = null;
+    this.lastPlanModeDowngrade = null;
+    this.lastModelReroute = null;
+    this.transientPlanStateByThread.clear();
 
     const relayURL = new URL(`${payload.relay.replace(/\/+$/, "")}/${payload.sessionId}`);
     const socket = await openWebSocket(relayURL.toString(), {
@@ -112,8 +124,12 @@ class RemodexWebClient {
     this.isConnected = false;
     this.isInitialized = false;
     this.pendingApproval = null;
+    this.pendingServerRequest = null;
     this.clearPendingWithoutReject();
     this.secureSession = null;
+    this.lastPlanModeDowngrade = null;
+    this.lastModelReroute = null;
+    this.transientPlanStateByThread.clear();
 
     if (!socket) {
       return;
@@ -155,6 +171,10 @@ class RemodexWebClient {
       };
       this.isConnected = false;
       this.isInitialized = false;
+      this.pendingApproval = null;
+      this.pendingServerRequest = null;
+      this.lastModelReroute = null;
+      this.transientPlanStateByThread.clear();
       this.rejectAllPending(new Error(`Relay closed (${code}) ${this.lastDisconnect.reason}`.trim()));
       rejectControlWaiters(
         this.pendingControlWaiters,
@@ -403,29 +423,56 @@ class RemodexWebClient {
     }
   }
 
-  async startTurn(threadId, text, { accessMode = "full-access", cwd = "", model = "" } = {}) {
+  async startTurn(
+    threadId,
+    text,
+    {
+      accessMode = "full-access",
+      cwd = "",
+      model = "",
+      effort = "",
+      collaborationMode = null,
+    } = {}
+  ) {
     const trimmed = String(text || "").trim();
     if (!trimmed) {
       throw new Error("Message cannot be empty");
     }
 
+    this.lastPlanModeDowngrade = null;
     await this.resumeThread(threadId, { cwd, accessMode, model });
 
-    const params = {
-      threadId,
-      input: [
-        {
-          type: "text",
-          text: trimmed,
-        },
-      ],
-    };
-    if (String(model || "").trim()) {
-      params.model = String(model).trim();
-    }
+    let includeCollaborationMode = Boolean(
+      collaborationMode
+      && this.supportsTurnCollaborationMode
+      && typeof collaborationMode === "object"
+    );
 
-    const response = await this.sendRequestWithSandboxFallback("turn/start", params, accessMode);
-    return response.result || {};
+    while (true) {
+      const params = buildTurnStartParams({
+        threadId,
+        text: trimmed,
+        model,
+        effort,
+        collaborationMode: includeCollaborationMode ? collaborationMode : null,
+      });
+
+      try {
+        const response = await this.sendRequestWithSandboxFallback("turn/start", params, accessMode);
+        return response.result || {};
+      } catch (error) {
+        if (!includeCollaborationMode || !shouldRetryTurnStartWithoutCollaborationMode(error)) {
+          throw error;
+        }
+
+        includeCollaborationMode = false;
+        this.supportsTurnCollaborationMode = false;
+        this.lastPlanModeDowngrade = {
+          occurredAt: new Date().toISOString(),
+          reason: "Plan mode is not supported by this runtime. The turn was sent as a normal message instead.",
+        };
+      }
+    }
   }
 
   async readThread(threadId) {
@@ -441,7 +488,14 @@ class RemodexWebClient {
 
       return {
         thread: decodeThreadSummary(threadObject),
-        messages: decodeThreadMessages(threadId, threadObject),
+        messages: mergeTransientThreadMessages(
+          threadId,
+          decodeThreadMessages(threadId, threadObject),
+          {
+            pendingServerRequest: this.pendingServerRequest,
+            transientPlanState: this.transientPlanStateByThread.get(threadId) || null,
+          }
+        ),
       };
     } catch (error) {
       if (!shouldTreatThreadAsEmpty(error)) {
@@ -458,24 +512,32 @@ class RemodexWebClient {
 
       return {
         thread: decodeThreadSummary(threadObject),
-        messages: [],
+        messages: mergeTransientThreadMessages(threadId, [], {
+          pendingServerRequest: this.pendingServerRequest,
+          transientPlanState: this.transientPlanStateByThread.get(threadId) || null,
+        }),
       };
     }
   }
 
   async respondToApproval(decision) {
-    if (!this.pendingApproval) {
-      throw new Error("No pending approval");
+    return this.respondToPendingServerRequest({ decision });
+  }
+
+  async respondToPendingServerRequest(payload = {}) {
+    const request = this.pendingServerRequest || this.pendingApproval;
+    if (!request) {
+      throw new Error("No pending server request");
     }
 
-    const approval = this.pendingApproval;
-    this.pendingApproval = null;
+    const result = buildServerRequestResponsePayload(request, payload);
     await this.sendMessage({
-      id: approval.id,
-      result: {
-        decision,
-      },
+      id: request.id,
+      result,
     });
+
+    this.pendingServerRequest = null;
+    this.pendingApproval = null;
     return this.status();
   }
 
@@ -721,13 +783,92 @@ class RemodexWebClient {
     }
 
     if (requestId && rpcMessage.method) {
-      if (isApprovalRequestMethod(rpcMessage.method)) {
-        this.pendingApproval = {
-          id: rpcMessage.id,
-          method: rpcMessage.method,
-          params: rpcMessage.params || null,
-        };
+      this.handleServerRequest(rpcMessage);
+      return;
+    }
+
+    if (rpcMessage.method) {
+      this.handleServerNotification(rpcMessage);
+    }
+  }
+
+  handleServerRequest(rpcMessage) {
+    const request = decodeServerRequest(rpcMessage);
+    if (!request) {
+      return;
+    }
+
+    this.pendingServerRequest = request;
+    this.pendingApproval = request.isApprovalLike ? request : null;
+  }
+
+  handleServerNotification(rpcMessage) {
+    const method = String(rpcMessage.method || "").trim();
+    const params = rpcMessage.params && typeof rpcMessage.params === "object"
+      ? rpcMessage.params
+      : null;
+    if (!method || !params) {
+      return;
+    }
+
+    if (method === "serverRequest/resolved") {
+      const resolvedId = params.requestId != null ? String(params.requestId) : "";
+      if (resolvedId && this.pendingServerRequest?.id === resolvedId) {
+        this.pendingServerRequest = null;
+        this.pendingApproval = null;
       }
+      return;
+    }
+
+    if (method === "turn/plan/updated") {
+      const threadId = stringOrEmpty(params.threadId);
+      if (!threadId) {
+        return;
+      }
+
+      this.transientPlanStateByThread.set(threadId, {
+        threadId,
+        turnId: stringOrEmpty(params.turnId),
+        explanation: stringOrEmpty(params.explanation),
+        steps: decodePlanSteps(params.plan),
+        text: this.transientPlanStateByThread.get(threadId)?.text || "",
+        updatedAt: new Date().toISOString(),
+      });
+      return;
+    }
+
+    if (method === "item/plan/delta") {
+      const threadId = stringOrEmpty(params.threadId);
+      if (!threadId) {
+        return;
+      }
+
+      const existing = this.transientPlanStateByThread.get(threadId) || {
+        threadId,
+        turnId: stringOrEmpty(params.turnId),
+        explanation: "",
+        steps: [],
+        text: "",
+        updatedAt: new Date().toISOString(),
+      };
+
+      existing.turnId = existing.turnId || stringOrEmpty(params.turnId);
+      existing.itemId = stringOrEmpty(params.itemId) || existing.itemId || "";
+      existing.text = `${existing.text || ""}${stringOrEmpty(params.delta)}`;
+      existing.updatedAt = new Date().toISOString();
+      this.transientPlanStateByThread.set(threadId, existing);
+      return;
+    }
+
+    if (method === "model/rerouted") {
+      this.lastModelReroute = {
+        threadId: stringOrEmpty(params.threadId),
+        turnId: stringOrEmpty(params.turnId),
+        fromModel: stringOrEmpty(params.fromModel),
+        toModel: stringOrEmpty(params.toModel),
+        reason: stringOrEmpty(params.reason),
+        occurredAt: new Date().toISOString(),
+      };
     }
   }
 
@@ -799,19 +940,21 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(HTTP_PORT, "0.0.0.0", () => {
-  console.log(`[remodex-web] listening on http://0.0.0.0:${HTTP_PORT}`);
-  if (!auth.hasPasswordConfigured()) {
-    console.warn("[remodex-web] admin password is not configured; run `npm run set-password -- --generate`");
-  }
-  const securitySummary = security.getSummary({
-    headers: {},
-    socket: { remoteAddress: "127.0.0.1" },
+if (require.main === module) {
+  server.listen(HTTP_PORT, "0.0.0.0", () => {
+    console.log(`[remodex-web] listening on http://0.0.0.0:${HTTP_PORT}`);
+    if (!auth.hasPasswordConfigured()) {
+      console.warn("[remodex-web] admin password is not configured; run `npm run set-password -- --generate`");
+    }
+    const securitySummary = security.getSummary({
+      headers: {},
+      socket: { remoteAddress: "127.0.0.1" },
+    });
+    console.log(
+      `[remodex-web] allowlist=${securitySummary.allowlistEnabled ? "on" : "off"} proxy_headers=${securitySummary.trustProxyHeaders ? "trusted" : "direct"}`
+    );
   });
-  console.log(
-    `[remodex-web] allowlist=${securitySummary.allowlistEnabled ? "on" : "off"} proxy_headers=${securitySummary.trustProxyHeaders ? "trusted" : "direct"}`
-  );
-});
+}
 
 async function handleApiRequest(req, res, url) {
   const connection = security.assertRequestAllowed(req);
@@ -1049,9 +1192,22 @@ async function handleApiRequest(req, res, url) {
     return;
   }
 
+  if (req.method === "POST" && url.pathname === "/api/server-requests/current/respond") {
+    const body = await readJsonBody(req);
+    const status = await client.respondToPendingServerRequest(body || {});
+    writeJson(res, 200, {
+      ok: true,
+      status,
+    });
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/api/approvals/current") {
     const body = await readJsonBody(req);
-    const status = await client.respondToApproval(body.decision || "accept");
+    const status = await client.respondToPendingServerRequest({
+      ...body,
+      decision: body.decision || "accept",
+    });
     writeJson(res, 200, {
       ok: true,
       status,
@@ -1354,7 +1510,24 @@ function shouldTreatThreadAsEmpty(error) {
   }
   const message = rpcError.message.toLowerCase();
   return message.includes("not materialized")
-    || (message.includes("includeturns") && message.includes("before first user message"));
+    || (message.includes("includeturns") && message.includes("before first user message"))
+    || (message.includes("failed to load rollout") && message.includes("is empty"));
+}
+
+function shouldRetryTurnStartWithoutCollaborationMode(error) {
+  const rpcError = extractRpcError(error);
+  if (!rpcError || (rpcError.code !== -32600 && rpcError.code !== -32602)) {
+    return false;
+  }
+
+  const message = rpcError.message.toLowerCase();
+  return message.includes("collaborationmode")
+    || message.includes("collaboration mode")
+    || message.includes("experimentalapi")
+    || message.includes("experimental api")
+    || message.includes("plan mode")
+    || message.includes("unknown field")
+    || message.includes("invalid");
 }
 
 function extractRpcError(error) {
@@ -1371,10 +1544,319 @@ function toRpcError(rpcError) {
   return error;
 }
 
+function buildTurnStartParams({ threadId, text, model = "", effort = "", collaborationMode = null }) {
+  const params = {
+    threadId,
+    input: [
+      {
+        type: "text",
+        text,
+      },
+    ],
+  };
+
+  if (String(model || "").trim()) {
+    params.model = String(model).trim();
+  }
+  if (String(effort || "").trim()) {
+    params.effort = String(effort).trim();
+  }
+  if (collaborationMode && typeof collaborationMode === "object") {
+    params.collaborationMode = collaborationMode;
+  }
+
+  return params;
+}
+
+function decodeServerRequest(rpcMessage) {
+  const method = stringOrEmpty(rpcMessage?.method);
+  if (!method || rpcMessage?.id == null) {
+    return null;
+  }
+
+  const params = rpcMessage.params && typeof rpcMessage.params === "object"
+    ? rpcMessage.params
+    : {};
+  const request = {
+    id: String(rpcMessage.id),
+    method,
+    kind: "",
+    isApprovalLike: false,
+    params,
+    threadId: stringOrEmpty(params.threadId),
+    turnId: stringOrEmpty(params.turnId),
+    itemId: stringOrEmpty(params.itemId),
+    createdAt: new Date().toISOString(),
+  };
+
+  if (method === "item/tool/requestUserInput") {
+    request.kind = "userInputPrompt";
+    request.questions = decodeStructuredQuestions(params.questions);
+    return request;
+  }
+
+  if (!isApprovalRequestMethod(method)) {
+    return null;
+  }
+
+  request.kind = approvalRequestKind(method);
+  request.isApprovalLike = true;
+  request.reason = stringOrEmpty(params.reason);
+  request.command = stringOrEmpty(params.command);
+  request.cwd = stringOrEmpty(params.cwd);
+  request.grantRoot = stringOrEmpty(params.grantRoot);
+  request.permissions = params.permissions && typeof params.permissions === "object"
+    ? params.permissions
+    : {};
+  request.availableDecisions = Array.isArray(params.availableDecisions)
+    ? params.availableDecisions
+    : [];
+  return request;
+}
+
+function buildServerRequestResponsePayload(request, payload = {}) {
+  if (request.method === "item/tool/requestUserInput") {
+    return buildStructuredUserInputResponse(payload.answersByQuestionId || payload.answers || {});
+  }
+
+  if (request.method === "item/permissions/requestApproval") {
+    const scope = normalizePermissionScope(payload.scope);
+    const normalizedDecision = normalizeApprovalDecision(payload.decision, "accept");
+    const permissions = normalizedDecision === "decline" || normalizedDecision === "cancel"
+      ? {}
+      : clonePlainObject(request.permissions);
+    return {
+      permissions,
+      scope,
+    };
+  }
+
+  if (request.method === "applyPatchApproval" || request.method === "execCommandApproval") {
+    return {
+      decision: mapReviewDecision(payload.decision),
+    };
+  }
+
+  if (request.method === "item/fileChange/requestApproval") {
+    return {
+      decision: mapFileChangeDecision(payload.decision),
+    };
+  }
+
+  return {
+    decision: mapCommandExecutionDecision(payload.decision),
+  };
+}
+
+function buildStructuredUserInputResponse(answersByQuestionId) {
+  const answers = {};
+
+  for (const [questionId, rawAnswers] of Object.entries(answersByQuestionId || {})) {
+    const nextAnswers = (Array.isArray(rawAnswers) ? rawAnswers : [rawAnswers])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
+    answers[questionId] = {
+      answers: nextAnswers,
+    };
+  }
+
+  return { answers };
+}
+
+function mergeTransientThreadMessages(threadId, messages, { pendingServerRequest = null, transientPlanState = null } = {}) {
+  const mergedMessages = Array.isArray(messages) ? messages.map((message) => ({ ...message })) : [];
+
+  if (transientPlanState && transientPlanState.threadId === threadId) {
+    const transientPlanMessage = buildTransientPlanMessage(transientPlanState);
+    if (transientPlanMessage) {
+      const existingIndex = mergedMessages.findIndex((message) => (
+        message.kind === "plan"
+        && (
+          (transientPlanMessage.turnId && message.turnId === transientPlanMessage.turnId)
+          || (transientPlanMessage.id && message.id === transientPlanMessage.id)
+        )
+      ));
+
+      if (existingIndex >= 0) {
+        mergedMessages[existingIndex] = {
+          ...mergedMessages[existingIndex],
+          ...transientPlanMessage,
+          text: transientPlanMessage.text || mergedMessages[existingIndex].text,
+        };
+      } else {
+        mergedMessages.push(transientPlanMessage);
+      }
+    }
+  }
+
+  if (pendingServerRequest?.kind === "userInputPrompt" && pendingServerRequest.threadId === threadId) {
+    mergedMessages.push(buildStructuredUserInputPromptMessage(pendingServerRequest));
+  }
+
+  return mergedMessages.sort((left, right) => {
+    if (left.createdAt === right.createdAt) {
+      return left.id.localeCompare(right.id);
+    }
+    return left.createdAt.localeCompare(right.createdAt);
+  });
+}
+
+function buildTransientPlanMessage(transientPlanState) {
+  const text = String(transientPlanState?.text || "").trim();
+  const planState = {
+    explanation: stringOrEmpty(transientPlanState?.explanation),
+    steps: decodePlanSteps(transientPlanState?.steps),
+  };
+  if (!text && !planState.explanation && planState.steps.length === 0) {
+    return null;
+  }
+
+  return {
+    id: stringOrEmpty(transientPlanState?.itemId)
+      || `plan-${stringOrEmpty(transientPlanState?.turnId) || stringOrEmpty(transientPlanState?.threadId)}`,
+    threadId: stringOrEmpty(transientPlanState?.threadId),
+    turnId: stringOrEmpty(transientPlanState?.turnId),
+    kind: "plan",
+    role: "system",
+    text: text || "Plan updated",
+    planState,
+    createdAt: stringOrEmpty(transientPlanState?.updatedAt) || new Date().toISOString(),
+  };
+}
+
+function buildStructuredUserInputPromptMessage(request) {
+  return {
+    id: request.id,
+    requestId: request.id,
+    threadId: request.threadId,
+    turnId: request.turnId,
+    kind: "userInputPrompt",
+    role: "system",
+    text: "Response required",
+    structuredUserInputRequest: {
+      questions: decodeStructuredQuestions(request.questions || request.params?.questions),
+    },
+    createdAt: request.createdAt || new Date().toISOString(),
+  };
+}
+
+function decodeStructuredQuestions(value) {
+  return (Array.isArray(value) ? value : [])
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+
+      return {
+        id: stringOrEmpty(entry.id),
+        header: stringOrEmpty(entry.header) || "Question",
+        question: stringOrEmpty(entry.question),
+        isOther: Boolean(entry.isOther),
+        isSecret: Boolean(entry.isSecret),
+        options: (Array.isArray(entry.options) ? entry.options : [])
+          .map((option) => {
+            if (!option || typeof option !== "object") {
+              return null;
+            }
+            return {
+              label: stringOrEmpty(option.label),
+              description: stringOrEmpty(option.description),
+            };
+          })
+          .filter(Boolean),
+      };
+    })
+    .filter((entry) => entry && entry.id);
+}
+
+function normalizePermissionScope(scope) {
+  return String(scope || "").trim().toLowerCase() === "session" ? "session" : "turn";
+}
+
+function normalizeApprovalDecision(value, fallback = "accept") {
+  const normalized = String(value || "").trim();
+  return normalized || fallback;
+}
+
+function mapCommandExecutionDecision(value) {
+  const normalized = normalizeApprovalDecision(value, "accept");
+  switch (normalized) {
+    case "acceptForSession":
+      return "acceptForSession";
+    case "decline":
+      return "decline";
+    case "cancel":
+      return "cancel";
+    case "accept":
+    default:
+      return "accept";
+  }
+}
+
+function mapFileChangeDecision(value) {
+  const normalized = normalizeApprovalDecision(value, "accept");
+  switch (normalized) {
+    case "acceptForSession":
+      return "acceptForSession";
+    case "decline":
+      return "decline";
+    case "cancel":
+      return "cancel";
+    case "accept":
+    default:
+      return "accept";
+  }
+}
+
+function mapReviewDecision(value) {
+  const normalized = normalizeApprovalDecision(value, "accept");
+  switch (normalized) {
+    case "acceptForSession":
+      return "approved_for_session";
+    case "decline":
+      return "denied";
+    case "cancel":
+      return "abort";
+    case "approved":
+    case "approved_for_session":
+    case "denied":
+    case "abort":
+      return normalized;
+    case "accept":
+    default:
+      return "approved";
+  }
+}
+
+function approvalRequestKind(method) {
+  switch (String(method || "").trim()) {
+    case "item/fileChange/requestApproval":
+      return "fileChangeApproval";
+    case "item/permissions/requestApproval":
+      return "permissionsApproval";
+    case "applyPatchApproval":
+      return "applyPatchApproval";
+    case "execCommandApproval":
+      return "execCommandApproval";
+    default:
+      return "commandApproval";
+  }
+}
+
+function clonePlainObject(value) {
+  return value && typeof value === "object"
+    ? JSON.parse(JSON.stringify(value))
+    : {};
+}
+
 function isApprovalRequestMethod(method) {
   const normalized = String(method || "").trim();
   return normalized === "item/commandExecution/requestApproval"
-    || normalized === "item/command_execution/request_approval";
+    || normalized === "item/command_execution/request_approval"
+    || normalized === "item/fileChange/requestApproval"
+    || normalized === "item/permissions/requestApproval"
+    || normalized === "applyPatchApproval"
+    || normalized === "execCommandApproval";
 }
 
 function openWebSocket(url, options) {
@@ -1625,6 +2107,7 @@ function decodeThreadMessages(threadId, threadObject) {
       case "plan":
         message.kind = "plan";
         message.text = decodePlanItemText(item);
+        message.planState = decodePlanState(item);
         break;
       default:
         if (!text) {
@@ -1715,6 +2198,41 @@ function decodeFileChangeItemText(itemObject) {
 
 function decodePlanItemText(itemObject) {
   return decodeItemText(itemObject) || "Plan updated";
+}
+
+function decodePlanState(itemObject) {
+  return {
+    explanation: stringOrEmpty(itemObject?.explanation),
+    steps: decodePlanSteps(itemObject?.plan),
+  };
+}
+
+function decodePlanSteps(value) {
+  return (Array.isArray(value) ? value : [])
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+
+      const step = stringOrEmpty(entry.step);
+      if (!step) {
+        return null;
+      }
+
+      const normalizedStatus = String(entry.status || "").trim();
+      let status = "pending";
+      if (normalizedStatus === "completed") {
+        status = "completed";
+      } else if (normalizedStatus === "in_progress" || normalizedStatus === "inProgress") {
+        status = "inProgress";
+      }
+
+      return {
+        step,
+        status,
+      };
+    })
+    .filter(Boolean);
 }
 
 function normalizeItemType(value) {
@@ -1911,3 +2429,17 @@ function rejectControlWaiters(waiters, error) {
     waiters.delete(waiter);
   }
 }
+
+module.exports = {
+  RemodexWebClient,
+  buildTurnStartParams,
+  buildServerRequestResponsePayload,
+  buildStructuredUserInputResponse,
+  decodePlanState,
+  decodePlanSteps,
+  decodeServerRequest,
+  decodeThreadMessages,
+  mergeTransientThreadMessages,
+  shouldRetryTurnStartWithoutCollaborationMode,
+  server,
+};

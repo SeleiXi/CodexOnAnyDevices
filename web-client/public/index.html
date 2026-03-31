@@ -271,6 +271,17 @@
                 ></div>
               </div>
 
+              <div class="composer-plan-control">
+                <button
+                  id="plan-button"
+                  class="ghost-button compact access-mode-button plan-button"
+                  type="button"
+                  aria-pressed="false"
+                >
+                  <strong id="plan-summary">Plan</strong>
+                </button>
+              </div>
+
               <div class="composer-access-control">
                 <button
                   id="access-mode-button"
@@ -451,15 +462,10 @@
               <p class="micro-label">Approval</p>
               <h3>Bridge is waiting</h3>
             </div>
-            <pre id="approval-text"></pre>
-            <div class="settings-actions two-up">
-              <button id="approve-button" class="primary-button" type="button">
-                Approve
-              </button>
-              <button id="decline-button" class="ghost-button" type="button">
-                Decline
-              </button>
-            </div>
+            <p id="approval-summary" class="support-copy muted"></p>
+            <div id="approval-details" class="approval-details"></div>
+            <div id="approval-controls" class="approval-controls" hidden></div>
+            <div id="approval-actions" class="settings-actions two-up"></div>
           </section>
         </main>
       </section>

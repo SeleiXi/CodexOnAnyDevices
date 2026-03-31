@@ -80,6 +80,7 @@ async function handleDesktopMethod(method, params, options = {}) {
   switch (method) {
     case "desktop/continueOnMac":
       return continueOnMac(params, {
+        platform,
         bundleId,
         appPath,
         executor,
@@ -101,6 +102,7 @@ async function handleDesktopMethod(method, params, options = {}) {
 async function continueOnMac(
   params,
   {
+    platform,
     bundleId,
     appPath,
     executor,
@@ -120,7 +122,7 @@ async function continueOnMac(
   }
 
   const targetUrl = `codex://threads/${threadId}`;
-  const desktopKnown = isThreadLikelyKnownOnDesktop(threadId, { env, fsModule });
+  const desktopKnown = isThreadLikelyKnownOnDesktop(threadId, { env, fsModule, platform });
   const appRunning = typeof isAppRunning === "function"
     ? await isAppRunning(appPath)
     : await detectRunningCodexApp(appPath, executor);
@@ -246,18 +248,22 @@ function desktopError(errorCode, userMessage, cause = null) {
   return error;
 }
 
-function isThreadLikelyKnownOnDesktop(threadId, { env, fsModule }) {
-  const sessionsRoot = resolveSessionsRootForEnv(env);
+function isThreadLikelyKnownOnDesktop(threadId, { env, fsModule, platform }) {
+  const sessionsRoot = resolveSessionsRootForEnv(env, { platform });
   // Any rollout means the thread already materialized locally, even if it originated on iPhone.
   return findRolloutFileForThread(sessionsRoot, threadId, { fsModule }) != null;
 }
 
-function resolveSessionsRootForEnv(env) {
+function resolveSessionsRootForEnv(env, { platform = DEFAULT_PLATFORM } = {}) {
   if (env?.CODEX_HOME) {
-    return path.join(env.CODEX_HOME, "sessions");
+    return targetPathModule(platform).join(env.CODEX_HOME, "sessions");
   }
 
   return resolveSessionsRoot();
+}
+
+function targetPathModule(platform) {
+  return platform === "win32" ? path.win32 : path.posix;
 }
 
 async function detectRunningCodexApp(appPath, executor) {

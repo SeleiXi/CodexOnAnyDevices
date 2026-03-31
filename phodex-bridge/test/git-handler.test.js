@@ -20,6 +20,10 @@ function git(cwd, ...args) {
   }).trim();
 }
 
+function normalizeLineEndings(value) {
+  return String(value).replace(/\r\n/g, "\n");
+}
+
 function makeTempRepo() {
   const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "remodex-git-handler-"));
   git(repoDir, "init", "-b", "main");
@@ -492,11 +496,11 @@ test("gitCreateWorktree carries tracked and untracked changes into the new workt
     });
 
     assert.equal(
-      fs.readFileSync(path.join(result.worktreePath, "..", "README.md"), "utf8"),
+      normalizeLineEndings(fs.readFileSync(path.join(result.worktreePath, "..", "README.md"), "utf8")),
       "# Test\nmoved\n"
     );
     assert.equal(
-      fs.readFileSync(path.join(result.worktreePath, "scratch.txt"), "utf8"),
+      normalizeLineEndings(fs.readFileSync(path.join(result.worktreePath, "scratch.txt"), "utf8")),
       "carry me\n"
     );
     assert.equal(git(repoDir, "status", "--short"), "");
@@ -533,16 +537,16 @@ test("gitCreateWorktree can copy tracked and untracked changes into the new work
     });
 
     assert.equal(
-      fs.readFileSync(path.join(result.worktreePath, "..", "README.md"), "utf8"),
+      normalizeLineEndings(fs.readFileSync(path.join(result.worktreePath, "..", "README.md"), "utf8")),
       "# Test\ncopied\n"
     );
     assert.equal(
-      fs.readFileSync(path.join(result.worktreePath, "scratch.txt"), "utf8"),
+      normalizeLineEndings(fs.readFileSync(path.join(result.worktreePath, "scratch.txt"), "utf8")),
       "keep me too\n"
     );
     assert.match(git(repoDir, "status", "--short"), /README\.md/);
     assert.equal(
-      fs.readFileSync(path.join(repoDir, "phodex-bridge", "scratch.txt"), "utf8"),
+      normalizeLineEndings(fs.readFileSync(path.join(repoDir, "phodex-bridge", "scratch.txt"), "utf8")),
       "keep me too\n"
     );
 

@@ -15,6 +15,7 @@ const state = {
   availableModels: [],
   selectedModelId: "",
   selectedReasoningEffort: "",
+  planModeArmed: false,
   pinnedThreadIds: [],
   threads: [],
   searchQuery: "",
@@ -26,6 +27,7 @@ const state = {
   statusPoller: null,
   threadPoller: null,
   messagePoller: null,
+  serverRequestDrafts: {},
 };
 
 const elements = {
@@ -80,6 +82,8 @@ const elements = {
   reasoningButton: document.querySelector("#reasoning-button"),
   reasoningMenu: document.querySelector("#reasoning-menu"),
   reasoningSummary: document.querySelector("#reasoning-summary"),
+  planButton: document.querySelector("#plan-button"),
+  planSummary: document.querySelector("#plan-summary"),
   accessModeButton: document.querySelector("#access-mode-button"),
   accessModeMenu: document.querySelector("#access-mode-menu"),
   accessModeSummary: document.querySelector("#access-mode-summary"),
@@ -102,9 +106,10 @@ const elements = {
   saveSecurityButton: document.querySelector("#save-security-button"),
   useCloudflareButton: document.querySelector("#use-cloudflare-button"),
   approvalPanel: document.querySelector("#approval-panel"),
-  approvalText: document.querySelector("#approval-text"),
-  approveButton: document.querySelector("#approve-button"),
-  declineButton: document.querySelector("#decline-button"),
+  approvalSummary: document.querySelector("#approval-summary"),
+  approvalDetails: document.querySelector("#approval-details"),
+  approvalControls: document.querySelector("#approval-controls"),
+  approvalActions: document.querySelector("#approval-actions"),
   logoutButton: document.querySelector("#logout-button"),
 };
 
@@ -137,6 +142,7 @@ function bindEvents() {
   elements.composerForm.addEventListener("submit", sendMessage);
   elements.modelButton.addEventListener("click", toggleModelMenu);
   elements.reasoningButton.addEventListener("click", toggleReasoningMenu);
+  elements.planButton.addEventListener("click", togglePlanModeArmed);
   elements.accessModeButton.addEventListener("click", toggleAccessModeMenu);
   elements.accessModeOptions.forEach((button) => {
     button.addEventListener("click", handleAccessModeOptionSelect);
@@ -148,8 +154,6 @@ function bindEvents() {
   elements.projectPath.addEventListener("input", renderComposerMeta);
   elements.saveSecurityButton.addEventListener("click", saveSecurityPolicy);
   elements.useCloudflareButton.addEventListener("click", applyCloudflareDefaults);
-  elements.approveButton.addEventListener("click", () => respondToApproval("accept"));
-  elements.declineButton.addEventListener("click", () => respondToApproval("decline"));
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       closeComposerMenus();
@@ -225,6 +229,7 @@ function leaveAuthenticatedMode(message = "") {
   state.availableModels = [];
   state.selectedModelId = "";
   state.selectedReasoningEffort = "";
+  state.planModeArmed = false;
   state.pinnedThreadIds = [];
   state.threads = [];
   state.activeThreadId = "";
@@ -232,6 +237,7 @@ function leaveAuthenticatedMode(message = "") {
   state.messages = [];
   state.lastRenderedThreadId = "";
   state.forceScrollToBottom = false;
+  state.serverRequestDrafts = {};
   state.currentView = "chat";
   state.sidebarOpen = false;
   document.body.classList.remove("sidebar-open");
@@ -399,6 +405,7 @@ async function refreshStatus() {
   try {
     const response = await api("/api/status");
     state.status = response.status;
+    pruneServerRequestDrafts();
     if (response.session) {
       state.session = response.session;
     }
@@ -622,6 +629,7 @@ async function refreshActiveThread() {
     const response = await api(`/api/threads/${encodeURIComponent(state.activeThreadId)}`);
     state.activeThread = response.thread;
     state.messages = response.messages || [];
+    clearAppError();
     renderMessages();
     renderThreads();
   } catch (error) {
@@ -643,6 +651,7 @@ async function sendMessage(event) {
 
   clearAppError();
   elements.composerInput.disabled = true;
+  const shouldUsePlanMode = state.planModeArmed;
   try {
     if (!state.activeThreadId) {
       await createThreadAndSelect();
@@ -650,6 +659,8 @@ async function sendMessage(event) {
     if (!state.activeThreadId) {
       return;
     }
+
+    const collaborationMode = shouldUsePlanMode ? buildPlanCollaborationModePayload() : undefined;
 
     await api(`/api/threads/${encodeURIComponent(state.activeThreadId)}/turns`, {
       method: "POST",
@@ -659,10 +670,15 @@ async function sendMessage(event) {
         accessMode: elements.accessMode.value,
         model: selectedModelRequestValue(),
         effort: selectedReasoningEffortRequestValue(),
+        collaborationMode,
       },
     });
     elements.composerInput.value = "";
+    if (shouldUsePlanMode) {
+      state.planModeArmed = false;
+    }
     state.forceScrollToBottom = true;
+    renderComposerMeta();
     await refreshActiveThread();
     await refreshThreads();
   } catch (error) {
@@ -674,11 +690,19 @@ async function sendMessage(event) {
 }
 
 async function respondToApproval(decision) {
+  return respondToServerRequest({ decision });
+}
+
+async function respondToServerRequest(payload) {
+  const requestId = activePendingServerRequest()?.id || "";
   try {
-    await api("/api/approvals/current", {
+    await api("/api/server-requests/current/respond", {
       method: "POST",
-      body: { decision },
+      body: payload,
     });
+    if (requestId) {
+      delete state.serverRequestDrafts[requestId];
+    }
     await refreshStatus();
     await refreshActiveThread();
   } catch (error) {
@@ -907,8 +931,8 @@ function renderMessages() {
 
   for (const message of state.messages) {
     const article = document.createElement("article");
-    article.className = `message-card role-${message.role}`;
-    article.innerHTML = `<pre>${escapeHTML(message.text)}</pre>`;
+    article.className = `message-card role-${message.role} kind-${message.kind || "chat"}`;
+    renderMessageCard(article, message);
     elements.messageList.appendChild(article);
   }
 
@@ -958,12 +982,36 @@ function renderHomeState() {
 }
 
 function renderBanner() {
-  const approval = state.status?.pendingApproval || null;
-  if (approval) {
+  const pendingRequest = activePendingServerRequest();
+  if (pendingRequest) {
     elements.statusBanner.hidden = false;
+    if (pendingRequest.kind === "userInputPrompt") {
+      elements.statusBannerTitle.textContent = "Bridge needs more input";
+      elements.statusBannerCopy.textContent = describeServerRequestSummary(pendingRequest);
+      elements.statusBannerAction.textContent = "Chat";
+      return;
+    }
     elements.statusBannerTitle.textContent = "Bridge is waiting for approval";
-    elements.statusBannerCopy.textContent = approval.method || "Review the request before the task continues.";
+    elements.statusBannerCopy.textContent = describeServerRequestSummary(pendingRequest);
     elements.statusBannerAction.textContent = "Review";
+    return;
+  }
+
+  const lastModelReroute = state.status?.lastModelReroute || null;
+  if (lastModelReroute?.reason || lastModelReroute?.toModel || lastModelReroute?.fromModel) {
+    elements.statusBanner.hidden = false;
+    elements.statusBannerTitle.textContent = "Model was rerouted";
+    elements.statusBannerCopy.textContent = describeModelReroute(lastModelReroute);
+    elements.statusBannerAction.textContent = "Chat";
+    return;
+  }
+
+  const lastPlanModeDowngrade = state.status?.lastPlanModeDowngrade || null;
+  if (lastPlanModeDowngrade?.reason) {
+    elements.statusBanner.hidden = false;
+    elements.statusBannerTitle.textContent = "Plan mode was downgraded";
+    elements.statusBannerCopy.textContent = lastPlanModeDowngrade.reason;
+    elements.statusBannerAction.textContent = "Chat";
     return;
   }
 
@@ -981,14 +1029,65 @@ function renderBanner() {
 }
 
 function renderApproval() {
-  const approval = state.status?.pendingApproval || null;
-  if (!approval) {
+  const request = activeApprovalRequest();
+  if (!request) {
     elements.approvalPanel.hidden = true;
-    elements.approvalText.textContent = "";
+    elements.approvalSummary.textContent = "";
+    elements.approvalDetails.innerHTML = "";
+    elements.approvalControls.innerHTML = "";
+    elements.approvalControls.hidden = true;
+    elements.approvalActions.innerHTML = "";
     return;
   }
+
   elements.approvalPanel.hidden = false;
-  elements.approvalText.textContent = JSON.stringify(approval, null, 2);
+  elements.approvalSummary.textContent = describeServerRequestSummary(request);
+
+  elements.approvalDetails.innerHTML = "";
+  appendDetailRow(elements.approvalDetails, "Type", approvalTypeLabel(request));
+  appendDetailRow(elements.approvalDetails, "Reason", request.reason);
+  appendDetailRow(elements.approvalDetails, "Command", request.command);
+  appendDetailRow(elements.approvalDetails, "Working directory", request.cwd);
+  appendDetailRow(elements.approvalDetails, "Grant root", request.grantRoot);
+  appendObjectDetail(elements.approvalDetails, "Permissions", request.permissions);
+
+  elements.approvalControls.innerHTML = "";
+  elements.approvalControls.hidden = true;
+  if (request.kind === "permissionsApproval") {
+    const draft = getServerRequestDraft(request.id);
+    const scopeLabel = document.createElement("label");
+    scopeLabel.className = "approval-control";
+    scopeLabel.innerHTML = `
+      <span>Grant scope</span>
+      <select>
+        <option value="turn">This turn</option>
+        <option value="session">This session</option>
+      </select>
+    `;
+    const select = scopeLabel.querySelector("select");
+    select.value = draft.scope === "session" ? "session" : "turn";
+    select.addEventListener("change", (event) => {
+      getServerRequestDraft(request.id).scope = event.currentTarget.value === "session" ? "session" : "turn";
+    });
+    elements.approvalControls.hidden = false;
+    elements.approvalControls.appendChild(scopeLabel);
+  }
+
+  elements.approvalActions.innerHTML = "";
+  for (const action of approvalActionsForRequest(request)) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = action.emphasis === "primary" ? "primary-button" : "ghost-button";
+    button.textContent = action.label;
+    button.addEventListener("click", async () => {
+      const draft = getServerRequestDraft(request.id);
+      await respondToServerRequest({
+        decision: action.decision,
+        scope: draft.scope || "turn",
+      });
+    });
+    elements.approvalActions.appendChild(button);
+  }
 }
 
 function renderComposerMeta() {
@@ -1014,6 +1113,16 @@ function renderComposerMeta() {
   elements.reasoningButton.setAttribute("aria-label", `Thinking level: ${selectedReasoningLabel}`);
   elements.reasoningButton.disabled = supportedReasoningOptions().length === 0;
   renderReasoningMenu();
+
+  const canPlan = Boolean(resolvePlanModeModelIdentifier());
+  elements.planButton.disabled = !canPlan;
+  elements.planButton.classList.toggle("selected", state.planModeArmed);
+  elements.planButton.setAttribute("aria-pressed", state.planModeArmed ? "true" : "false");
+  elements.planButton.setAttribute(
+    "aria-label",
+    state.planModeArmed ? "Plan mode armed for the next turn" : "Plan mode is off"
+  );
+  elements.planSummary.textContent = state.planModeArmed ? "Plan Next" : "Plan";
 }
 
 function renderModelMenu() {
@@ -1247,7 +1356,24 @@ function handleHomeSecondaryAction() {
   void loadDefaultPairing();
 }
 
-function handleBannerAction() {
+async function handleBannerAction() {
+  const pendingRequest = activePendingServerRequest();
+  if (pendingRequest?.threadId) {
+    state.activeThreadId = pendingRequest.threadId;
+    await refreshActiveThread();
+    renderThreads();
+  }
+
+  if (pendingRequest?.kind === "userInputPrompt") {
+    setCurrentView("chat");
+    return;
+  }
+
+  if (!pendingRequest && (state.status?.lastPlanModeDowngrade?.reason || state.status?.lastModelReroute?.reason)) {
+    setCurrentView("chat");
+    return;
+  }
+
   setCurrentView("connection");
 }
 
@@ -1493,6 +1619,43 @@ function reasoningDisplayTitle(effort) {
 
 function activeReasoningDisplayTitle() {
   return reasoningDisplayTitle(effectiveReasoningEffort());
+}
+
+function resolvePlanModeModelIdentifier() {
+  const explicitModel = selectedModelRequestValue();
+  if (explicitModel) {
+    return explicitModel;
+  }
+
+  const effectiveModel = effectiveModelOption();
+  return String(effectiveModel?.model || effectiveModel?.id || "").trim() || "";
+}
+
+function buildPlanCollaborationModePayload() {
+  const model = resolvePlanModeModelIdentifier();
+  if (!model) {
+    throw new Error("Plan mode requires an available model before sending.");
+  }
+
+  return {
+    mode: "plan",
+    settings: {
+      model,
+      reasoning_effort: selectedReasoningEffortRequestValue() || null,
+      developer_instructions: null,
+    },
+  };
+}
+
+function togglePlanModeArmed() {
+  if (!resolvePlanModeModelIdentifier()) {
+    showAppError("Plan mode requires an available model before sending.");
+    return;
+  }
+
+  clearAppError();
+  state.planModeArmed = !state.planModeArmed;
+  renderComposerMeta();
 }
 
 function isSelectedReasoningEffort(effort) {
@@ -1802,4 +1965,419 @@ function formatDateOnly(value) {
     return "";
   }
   return parsed.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function activePendingServerRequest() {
+  const request = state.status?.pendingServerRequest || state.status?.pendingApproval || null;
+  return request && typeof request === "object" ? request : null;
+}
+
+function activeApprovalRequest() {
+  const request = activePendingServerRequest();
+  if (!request || request.kind === "userInputPrompt") {
+    return null;
+  }
+  return request;
+}
+
+function pruneServerRequestDrafts() {
+  const activeRequestId = activePendingServerRequest()?.id || "";
+  if (!activeRequestId) {
+    state.serverRequestDrafts = {};
+    return;
+  }
+
+  const activeDraft = state.serverRequestDrafts[activeRequestId];
+  state.serverRequestDrafts = activeDraft
+    ? { [activeRequestId]: activeDraft }
+    : {};
+}
+
+function getServerRequestDraft(requestId) {
+  const normalizedId = String(requestId || "").trim();
+  if (!normalizedId) {
+    return {
+      scope: "turn",
+      answersByQuestionId: {},
+    };
+  }
+
+  if (!state.serverRequestDrafts[normalizedId]) {
+    state.serverRequestDrafts[normalizedId] = {
+      scope: "turn",
+      answersByQuestionId: {},
+    };
+  }
+  return state.serverRequestDrafts[normalizedId];
+}
+
+function getQuestionDraft(requestId, questionId) {
+  const draft = getServerRequestDraft(requestId);
+  if (!draft.answersByQuestionId[questionId]) {
+    draft.answersByQuestionId[questionId] = {
+      selectedOption: "",
+      customAnswer: "",
+    };
+  }
+  return draft.answersByQuestionId[questionId];
+}
+
+function renderMessageCard(article, message) {
+  const kindLabel = messageKindLabel(message);
+  if (kindLabel) {
+    const header = document.createElement("div");
+    header.className = "message-card-header";
+    header.innerHTML = `
+      <span class="message-kind">${escapeHTML(kindLabel)}</span>
+      <time class="message-time">${escapeHTML(compactRelativeTime(message.createdAt || ""))}</time>
+    `;
+    article.appendChild(header);
+  }
+
+  if (message.kind === "plan") {
+    renderPlanMessageCard(article, message);
+    return;
+  }
+
+  if (message.kind === "userInputPrompt") {
+    renderUserInputPromptCard(article, message);
+    return;
+  }
+
+  appendMessageText(article, message.text);
+}
+
+function renderPlanMessageCard(article, message) {
+  const planState = message.planState || {};
+  if (planState.explanation) {
+    const explanation = document.createElement("p");
+    explanation.className = "plan-explanation";
+    explanation.textContent = planState.explanation;
+    article.appendChild(explanation);
+  }
+
+  if (message.text && message.text !== planState.explanation) {
+    appendMessageText(article, message.text);
+  }
+
+  const steps = Array.isArray(planState.steps) ? planState.steps : [];
+  if (!steps.length) {
+    return;
+  }
+
+  const list = document.createElement("div");
+  list.className = "plan-step-list";
+  for (const step of steps) {
+    const row = document.createElement("div");
+    row.className = `plan-step status-${normalizePlanStatus(step.status)}`;
+    row.innerHTML = `
+      <span class="plan-step-status">${escapeHTML(planStatusLabel(step.status))}</span>
+      <span class="plan-step-text">${escapeHTML(step.step || "")}</span>
+    `;
+    list.appendChild(row);
+  }
+  article.appendChild(list);
+}
+
+function renderUserInputPromptCard(article, message) {
+  const requestId = String(message.requestId || message.id || "").trim();
+  const questions = message.structuredUserInputRequest?.questions || [];
+
+  if (message.text) {
+    const intro = document.createElement("p");
+    intro.className = "support-copy muted";
+    intro.textContent = message.text;
+    article.appendChild(intro);
+  }
+
+  const form = document.createElement("form");
+  form.className = "structured-request-form";
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await submitStructuredUserInputRequest(requestId, questions);
+  });
+
+  for (const question of questions) {
+    const card = document.createElement("section");
+    card.className = "prompt-question-card";
+
+    const label = document.createElement("div");
+    label.className = "prompt-question-header";
+    label.innerHTML = `
+      <strong>${escapeHTML(question.header || "Question")}</strong>
+      <p>${escapeHTML(question.question || "")}</p>
+    `;
+    card.appendChild(label);
+
+    const questionDraft = getQuestionDraft(requestId, question.id);
+    const selectedOption = questionDraft.customAnswer ? "" : String(questionDraft.selectedOption || "");
+
+    if (Array.isArray(question.options) && question.options.length > 0) {
+      const options = document.createElement("div");
+      options.className = "prompt-option-list";
+      question.options.forEach((option, index) => {
+        const optionId = `${requestId}-${question.id}-${index}`;
+        const optionLabel = document.createElement("label");
+        optionLabel.className = "prompt-option";
+        optionLabel.innerHTML = `
+          <input type="radio" name="question-${escapeHTML(question.id)}" value="${escapeHTML(option.label || "")}">
+          <span>
+            <strong>${escapeHTML(option.label || "Option")}</strong>
+            <small>${escapeHTML(option.description || "")}</small>
+          </span>
+        `;
+        const input = optionLabel.querySelector("input");
+        input.id = optionId;
+        input.checked = selectedOption === String(option.label || "");
+        input.addEventListener("change", () => {
+          const draft = getQuestionDraft(requestId, question.id);
+          draft.selectedOption = String(option.label || "");
+          draft.customAnswer = "";
+        });
+        options.appendChild(optionLabel);
+      });
+      card.appendChild(options);
+    }
+
+    const freeInput = document.createElement(question.isSecret ? "input" : "textarea");
+    freeInput.className = "prompt-free-input";
+    if (question.isSecret) {
+      freeInput.type = "password";
+    } else {
+      freeInput.rows = 2;
+    }
+    freeInput.placeholder = question.options?.length ? "Other answer" : "Your answer";
+    freeInput.value = questionDraft.customAnswer || "";
+    freeInput.addEventListener("input", (event) => {
+      const draft = getQuestionDraft(requestId, question.id);
+      draft.customAnswer = event.currentTarget.value;
+      if (draft.customAnswer.trim()) {
+        draft.selectedOption = "";
+      }
+    });
+    card.appendChild(freeInput);
+
+    form.appendChild(card);
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "prompt-actions";
+  const submitButton = document.createElement("button");
+  submitButton.type = "submit";
+  submitButton.className = "primary-button";
+  submitButton.textContent = "Submit response";
+  actions.appendChild(submitButton);
+  form.appendChild(actions);
+
+  article.appendChild(form);
+}
+
+async function submitStructuredUserInputRequest(requestId, questions) {
+  const request = activePendingServerRequest();
+  if (!request || request.kind !== "userInputPrompt" || request.id !== requestId) {
+    showAppError("The input request is no longer active.");
+    return;
+  }
+
+  const answersByQuestionId = {};
+  for (const question of questions) {
+    const draft = getQuestionDraft(requestId, question.id);
+    const answer = String(draft.customAnswer || draft.selectedOption || "").trim();
+    if (!answer) {
+      showAppError(`${question.header || "Question"} requires an answer.`);
+      return;
+    }
+    answersByQuestionId[question.id] = [answer];
+  }
+
+  clearAppError();
+  await respondToServerRequest({
+    answersByQuestionId,
+  });
+}
+
+function appendMessageText(container, text) {
+  const normalizedText = String(text || "").trim();
+  if (!normalizedText) {
+    return;
+  }
+  const pre = document.createElement("pre");
+  pre.textContent = normalizedText;
+  container.appendChild(pre);
+}
+
+function appendDetailRow(container, label, value) {
+  const normalizedValue = String(value || "").trim();
+  if (!normalizedValue) {
+    return;
+  }
+
+  const row = document.createElement("div");
+  row.className = "approval-detail-row";
+  row.innerHTML = `
+    <span>${escapeHTML(label)}</span>
+    <strong>${escapeHTML(normalizedValue)}</strong>
+  `;
+  container.appendChild(row);
+}
+
+function appendObjectDetail(container, label, value) {
+  if (!value || typeof value !== "object" || Object.keys(value).length === 0) {
+    return;
+  }
+
+  const section = document.createElement("div");
+  section.className = "approval-detail-block";
+  const title = document.createElement("span");
+  title.className = "approval-detail-label";
+  title.textContent = label;
+  const pre = document.createElement("pre");
+  pre.textContent = JSON.stringify(value, null, 2);
+  section.appendChild(title);
+  section.appendChild(pre);
+  container.appendChild(section);
+}
+
+function messageKindLabel(message) {
+  switch (message.kind) {
+    case "thinking":
+      return "Thinking";
+    case "tool":
+      return "Tool Call";
+    case "command":
+      return "Command";
+    case "file":
+      return "File Change";
+    case "plan":
+      return "Plan";
+    case "userInputPrompt":
+      return "Input Required";
+    default:
+      return message.role === "system" ? "System" : "";
+  }
+}
+
+function normalizePlanStatus(status) {
+  const normalized = String(status || "").trim();
+  if (normalized === "completed") {
+    return "completed";
+  }
+  if (normalized === "inProgress" || normalized === "in_progress") {
+    return "in-progress";
+  }
+  return "pending";
+}
+
+function planStatusLabel(status) {
+  switch (normalizePlanStatus(status)) {
+    case "completed":
+      return "Done";
+    case "in-progress":
+      return "Active";
+    default:
+      return "Pending";
+  }
+}
+
+function approvalTypeLabel(request) {
+  switch (request.kind) {
+    case "fileChangeApproval":
+      return "File change";
+    case "permissionsApproval":
+      return "Permissions";
+    case "applyPatchApproval":
+      return "Apply patch";
+    case "execCommandApproval":
+      return "Command execution";
+    default:
+      return "Command";
+  }
+}
+
+function describeServerRequestSummary(request) {
+  if (!request) {
+    return "";
+  }
+
+  if (request.kind === "userInputPrompt") {
+    const count = Array.isArray(request.questions) ? request.questions.length : 0;
+    return count
+      ? `${count} question${count === 1 ? "" : "s"} require a response before the turn can continue.`
+      : "The bridge needs more input before the turn can continue.";
+  }
+
+  if (request.reason) {
+    return request.reason;
+  }
+
+  if (request.command) {
+    return request.command;
+  }
+
+  switch (request.kind) {
+    case "permissionsApproval":
+      return "The bridge needs permission approval before continuing.";
+    case "fileChangeApproval":
+      return "The bridge wants to change files in the workspace.";
+    case "applyPatchApproval":
+      return "The bridge is waiting for patch approval.";
+    case "execCommandApproval":
+      return "The bridge is waiting for command approval.";
+    default:
+      return "Review the request before the task continues.";
+  }
+}
+
+function describeModelReroute(reroute) {
+  const fromModel = String(reroute?.fromModel || "").trim();
+  const toModel = String(reroute?.toModel || "").trim();
+  const reason = String(reroute?.reason || "").trim();
+  const modelCopy = fromModel && toModel
+    ? `Request rerouted from ${fromModel} to ${toModel}.`
+    : toModel
+      ? `Request rerouted to ${toModel}.`
+      : "The runtime chose a different model for this turn.";
+  return reason ? `${modelCopy} ${reason}` : modelCopy;
+}
+
+function approvalActionsForRequest(request) {
+  if (request.kind === "permissionsApproval") {
+    return [
+      { decision: "accept", label: "Approve", emphasis: "primary" },
+      { decision: "decline", label: "Decline", emphasis: "secondary" },
+    ];
+  }
+
+  const defaults = request.kind === "applyPatchApproval" || request.kind === "execCommandApproval"
+    ? ["approved", "approved_for_session", "denied", "abort"]
+    : ["accept", "acceptForSession", "decline", "cancel"];
+  const rawDecisions = Array.isArray(request.availableDecisions) && request.availableDecisions.length
+    ? request.availableDecisions
+    : defaults;
+
+  return rawDecisions
+    .map((decision) => approvalActionMeta(decision))
+    .filter(Boolean);
+}
+
+function approvalActionMeta(decision) {
+  const normalized = String(decision || "").trim();
+  switch (normalized) {
+    case "accept":
+    case "approved":
+      return { decision: normalized, label: "Approve", emphasis: "primary" };
+    case "acceptForSession":
+    case "approved_for_session":
+      return { decision: normalized, label: "Approve for Session", emphasis: "secondary" };
+    case "decline":
+      return { decision: normalized, label: "Decline", emphasis: "secondary" };
+    case "denied":
+      return { decision: normalized, label: "Deny", emphasis: "secondary" };
+    case "cancel":
+      return { decision: normalized, label: "Cancel", emphasis: "secondary" };
+    case "abort":
+      return { decision: normalized, label: "Abort", emphasis: "secondary" };
+    default:
+      return null;
+  }
 }
