@@ -79,7 +79,7 @@ Web UI 使用本地管理员密码登录。
 - 在有公网 IP 或公网域名的 Linux 机器上运行 `relay/`
 - 在真正运行 Codex 的 Windows、macOS 或 Linux 机器上运行 `phodex-bridge/`
 - 通过 `REMODEX_RELAY` 让 bridge 指向这个公网 relay
-- 在你希望提供浏览器界面的地方运行 `web-client/`，通常就是和 bridge 同机
+- 在你希望提供浏览器界面的地方运行 `web-client/`，比如在你的公网服务器上
 - 此方案建议用wss以免数据泄露。其他方案下，会有上层协议/本来就处于私网，所以可以保证数据安全，用ws也无所谓
 
 bridge 启动示例：
