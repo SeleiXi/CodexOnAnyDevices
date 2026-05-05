@@ -911,7 +911,7 @@ function renderThreads() {
       pinButton.className = `thread-pin-indicator ${thread.pinned ? "is-pinned" : ""}`;
       pinButton.setAttribute("aria-label", thread.pinned ? "Unpin thread" : "Pin thread");
       pinButton.setAttribute("title", thread.pinned ? "Unpin thread" : "Pin thread");
-      pinButton.textContent = "??";
+      pinButton.innerHTML = "&#128204;";
       pinButton.addEventListener("click", async (event) => {
         event.stopPropagation();
         await toggleThreadPin(thread.id);
