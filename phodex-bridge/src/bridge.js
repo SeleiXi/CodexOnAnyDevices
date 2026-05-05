@@ -38,7 +38,7 @@ const { createRolloutLiveMirrorController } = require("./rollout-live-mirror");
 
 const execFileAsync = promisify(execFile);
 const RELAY_WATCHDOG_PING_INTERVAL_MS = 10_000;
-const RELAY_WATCHDOG_STALE_AFTER_MS = 25_000;
+const RELAY_WATCHDOG_STALE_AFTER_MS = 60_000;
 const BRIDGE_STATUS_HEARTBEAT_INTERVAL_MS = 5_000;
 const STALE_RELAY_STATUS_MESSAGE = "Relay heartbeat stalled; reconnect pending.";
 const RELAY_HISTORY_IMAGE_REFERENCE_URL = "remodex://history-image-elided";
