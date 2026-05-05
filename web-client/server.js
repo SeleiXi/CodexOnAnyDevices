@@ -1450,7 +1450,15 @@ function serveStaticFile(res, pathname) {
   res.statusCode = 200;
   res.setHeader("content-type", contentType);
   res.setHeader("cache-control", "no-store, max-age=0");
-  fs.createReadStream(resolvedPath).pipe(res);
+  const stream = fs.createReadStream(resolvedPath);
+  stream.on("error", () => {
+    if (!res.headersSent) {
+      writeText(res, 500, "Failed to read static asset");
+      return;
+    }
+    res.destroy();
+  });
+  stream.pipe(res);
 }
 
 function readJsonBody(req) {
