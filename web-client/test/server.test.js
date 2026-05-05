@@ -294,6 +294,71 @@ test("stale socket close events do not clear a newer bridge connection", () => {
   assert.equal(client.lastDisconnect.reason, "live");
 });
 
+test("live notifications are merged into thread reads while rollout history catches up", () => {
+  const client = createClientStub();
+
+  client.routeRpcMessage({
+    method: "turn/started",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+    },
+  });
+  client.routeRpcMessage({
+    method: "item/reasoning/textDelta",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "thinking-1",
+      delta: "Inspecting",
+    },
+  });
+  client.routeRpcMessage({
+    method: "item/reasoning/textDelta",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "thinking-1",
+      delta: " files",
+    },
+  });
+  client.routeRpcMessage({
+    method: "codex/event/exec_command_begin",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      call_id: "cmd-1",
+      command: "npm test",
+    },
+  });
+  client.routeRpcMessage({
+    method: "codex/event/exec_command_output_delta",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      call_id: "cmd-1",
+      command: "npm test",
+      chunk: "pass\n",
+    },
+  });
+  client.routeRpcMessage({
+    method: "codex/event/agent_message",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      message: "Done",
+    },
+  });
+
+  const mergedMessages = mergeTransientThreadMessages("thread-1", [], {
+    transientLiveMessages: client.transientLiveMessagesByThread.get("thread-1"),
+  });
+
+  assert.equal(mergedMessages.some((message) => message.text === "Inspecting files"), true);
+  assert.equal(mergedMessages.some((message) => message.kind === "command" && message.text.includes("pass")), true);
+  assert.equal(mergedMessages.some((message) => message.role === "assistant" && message.text === "Done"), true);
+});
+
 test("buildServerRequestResponsePayload encodes typed response shapes", () => {
   const commandResponse = buildServerRequestResponsePayload(
     {

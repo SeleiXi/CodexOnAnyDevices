@@ -70,6 +70,7 @@ class RemodexWebClient {
     this.lastModelReroute = null;
     this.connectionOperation = Promise.resolve();
     this.transientPlanStateByThread = new Map();
+    this.transientLiveMessagesByThread = new Map();
   }
 
   status() {
@@ -103,6 +104,7 @@ class RemodexWebClient {
     this.lastPlanModeDowngrade = null;
     this.lastModelReroute = null;
     this.transientPlanStateByThread.clear();
+    this.transientLiveMessagesByThread.clear();
 
     const relayURL = new URL(`${payload.relay.replace(/\/+$/, "")}/${payload.sessionId}`);
     const socket = await openWebSocket(relayURL.toString(), {
@@ -148,6 +150,7 @@ class RemodexWebClient {
     this.lastPlanModeDowngrade = null;
     this.lastModelReroute = null;
     this.transientPlanStateByThread.clear();
+    this.transientLiveMessagesByThread.clear();
 
     if (!socket) {
       return;
@@ -196,6 +199,7 @@ class RemodexWebClient {
       this.pendingServerRequest = null;
       this.lastModelReroute = null;
       this.transientPlanStateByThread.clear();
+      this.transientLiveMessagesByThread.clear();
       this.rejectAllPending(new Error(`Relay closed (${code}) ${this.lastDisconnect.reason}`.trim()));
       rejectControlWaiters(
         this.pendingControlWaiters,
@@ -518,6 +522,7 @@ class RemodexWebClient {
           {
             pendingServerRequest: this.pendingServerRequest,
             transientPlanState: this.transientPlanStateByThread.get(threadId) || null,
+            transientLiveMessages: this.transientLiveMessagesByThread.get(threadId) || [],
           }
         ),
       };
@@ -539,6 +544,7 @@ class RemodexWebClient {
         messages: mergeTransientThreadMessages(threadId, [], {
           pendingServerRequest: this.pendingServerRequest,
           transientPlanState: this.transientPlanStateByThread.get(threadId) || null,
+          transientLiveMessages: this.transientLiveMessagesByThread.get(threadId) || [],
         }),
       };
     }
@@ -884,6 +890,82 @@ class RemodexWebClient {
       return;
     }
 
+    if (method === "turn/started") {
+      this.rememberTransientLiveMessage({
+        id: liveMessageId("thinking", params),
+        threadId: stringOrEmpty(params.threadId),
+        turnId: stringOrEmpty(params.turnId || params.id),
+        kind: "thinking",
+        role: "system",
+        text: "Working...",
+      });
+      return;
+    }
+
+    if (method === "item/reasoning/textDelta" || method === "item/plan/textDelta") {
+      this.rememberTransientLiveMessage({
+        id: stringOrEmpty(params.itemId) || liveMessageId("thinking", params),
+        threadId: stringOrEmpty(params.threadId),
+        turnId: stringOrEmpty(params.turnId),
+        kind: "thinking",
+        role: "system",
+        text: stringPreserveWhitespace(params.delta ?? params.text),
+      }, { append: true });
+      return;
+    }
+
+    if (method === "codex/event/agent_message") {
+      this.rememberTransientLiveMessage({
+        id: liveMessageId("assistant", params),
+        threadId: stringOrEmpty(params.threadId),
+        turnId: stringOrEmpty(params.turnId),
+        kind: "chat",
+        role: "assistant",
+        text: stringOrEmpty(params.message || params.text),
+      });
+      return;
+    }
+
+    if (method === "codex/event/exec_command_begin") {
+      this.rememberTransientCommand(params, {
+        status: "running",
+      });
+      return;
+    }
+
+    if (method === "codex/event/exec_command_output_delta") {
+      this.rememberTransientCommand(params, {
+        status: "running",
+        appendOutput: stringPreserveWhitespace(params.chunk ?? params.output),
+      });
+      return;
+    }
+
+    if (method === "codex/event/exec_command_end") {
+      this.rememberTransientCommand(params, {
+        status: stringOrEmpty(params.status) || "completed",
+        output: stringPreserveWhitespace(params.output),
+      });
+      return;
+    }
+
+    if (method === "codex/event/background_event") {
+      this.rememberTransientLiveMessage({
+        id: liveMessageId("tool", params),
+        threadId: stringOrEmpty(params.threadId),
+        turnId: stringOrEmpty(params.turnId),
+        kind: "tool",
+        role: "system",
+        text: stringOrEmpty(params.message) || "Tool activity",
+      });
+      return;
+    }
+
+    if (method === "turn/completed") {
+      this.pruneTransientLiveMessages(stringOrEmpty(params.threadId), stringOrEmpty(params.turnId || params.id));
+      return;
+    }
+
     if (method === "model/rerouted") {
       this.lastModelReroute = {
         threadId: stringOrEmpty(params.threadId),
@@ -893,6 +975,89 @@ class RemodexWebClient {
         reason: stringOrEmpty(params.reason),
         occurredAt: new Date().toISOString(),
       };
+    }
+  }
+
+  rememberTransientCommand(params, { status = "running", appendOutput = "", output = null } = {}) {
+    const threadId = stringOrEmpty(params.threadId);
+    const command = stringOrEmpty(params.command) || "Command execution";
+    const messageId = liveMessageId("command", params);
+    const existing = this.findTransientLiveMessage(threadId, messageId);
+    const nextOutput = output !== null
+      ? output
+      : `${existing?.output || ""}${appendOutput || ""}`;
+
+    this.rememberTransientLiveMessage({
+      id: messageId,
+      threadId,
+      turnId: stringOrEmpty(params.turnId),
+      kind: "command",
+      role: "system",
+      text: formatLiveCommandText(command, status, nextOutput),
+      command,
+      output: nextOutput,
+      status,
+    });
+  }
+
+  rememberTransientLiveMessage(message, { append = false } = {}) {
+    const threadId = stringOrEmpty(message?.threadId);
+    const messageId = stringOrEmpty(message?.id);
+    if (!threadId || !messageId) {
+      return;
+    }
+
+    const messages = this.transientLiveMessagesByThread.get(threadId) || [];
+    const existingIndex = messages.findIndex((entry) => entry.id === messageId);
+    const now = new Date().toISOString();
+
+    if (existingIndex >= 0) {
+      const existing = messages[existingIndex];
+      messages[existingIndex] = {
+        ...existing,
+        ...message,
+        text: append ? `${existing.text || ""}${message.text || ""}` : (message.text || existing.text || ""),
+        createdAt: existing.createdAt || message.createdAt || now,
+        updatedAt: now,
+      };
+    } else {
+      messages.push({
+        threadId,
+        role: "system",
+        kind: "chat",
+        text: "",
+        createdAt: now,
+        ...message,
+        id: messageId,
+      });
+    }
+
+    this.transientLiveMessagesByThread.set(threadId, messages.slice(-40));
+  }
+
+  findTransientLiveMessage(threadId, messageId) {
+    const messages = this.transientLiveMessagesByThread.get(threadId) || [];
+    return messages.find((message) => message.id === messageId) || null;
+  }
+
+  pruneTransientLiveMessages(threadId, turnId) {
+    if (!threadId || !turnId) {
+      return;
+    }
+
+    const messages = this.transientLiveMessagesByThread.get(threadId) || [];
+    const now = Date.now();
+    const retained = messages.filter((message) => {
+      if (message.turnId !== turnId) {
+        return true;
+      }
+      const messageTime = decodeTimestamp(message.updatedAt || message.createdAt);
+      return messageTime ? now - messageTime.getTime() < 20_000 : false;
+    });
+    if (retained.length) {
+      this.transientLiveMessagesByThread.set(threadId, retained);
+    } else {
+      this.transientLiveMessagesByThread.delete(threadId);
     }
   }
 
@@ -1889,7 +2054,15 @@ function buildStructuredUserInputResponse(answersByQuestionId) {
   return { answers };
 }
 
-function mergeTransientThreadMessages(threadId, messages, { pendingServerRequest = null, transientPlanState = null } = {}) {
+function mergeTransientThreadMessages(
+  threadId,
+  messages,
+  {
+    pendingServerRequest = null,
+    transientPlanState = null,
+    transientLiveMessages = [],
+  } = {}
+) {
   const mergedMessages = Array.isArray(messages) ? messages.map((message) => ({ ...message })) : [];
 
   if (transientPlanState && transientPlanState.threadId === threadId) {
@@ -1919,12 +2092,65 @@ function mergeTransientThreadMessages(threadId, messages, { pendingServerRequest
     mergedMessages.push(buildStructuredUserInputPromptMessage(pendingServerRequest));
   }
 
+  for (const transientMessage of Array.isArray(transientLiveMessages) ? transientLiveMessages : []) {
+    const normalizedMessage = normalizeTransientLiveMessage(threadId, transientMessage);
+    if (!normalizedMessage) {
+      continue;
+    }
+
+    const existingIndex = mergedMessages.findIndex((message) => (
+      message.id === normalizedMessage.id
+      || (
+        normalizedMessage.turnId
+        && message.turnId === normalizedMessage.turnId
+        && message.kind === normalizedMessage.kind
+        && message.role === normalizedMessage.role
+        && message.text === normalizedMessage.text
+      )
+    ));
+    if (existingIndex >= 0) {
+      mergedMessages[existingIndex] = {
+        ...mergedMessages[existingIndex],
+        ...normalizedMessage,
+        createdAt: mergedMessages[existingIndex].createdAt || normalizedMessage.createdAt,
+      };
+    } else {
+      mergedMessages.push(normalizedMessage);
+    }
+  }
+
   return mergedMessages.sort((left, right) => {
     if (left.createdAt === right.createdAt) {
       return left.id.localeCompare(right.id);
     }
     return left.createdAt.localeCompare(right.createdAt);
   });
+}
+
+function normalizeTransientLiveMessage(threadId, message) {
+  if (!message || typeof message !== "object") {
+    return null;
+  }
+
+  const text = stringOrEmpty(message.text);
+  if (!text) {
+    return null;
+  }
+
+  const normalizedThreadId = stringOrEmpty(message.threadId) || threadId;
+  if (normalizedThreadId !== threadId) {
+    return null;
+  }
+
+  return {
+    id: stringOrEmpty(message.id) || `live-${message.kind || "message"}-${message.turnId || Date.now()}`,
+    threadId: normalizedThreadId,
+    turnId: stringOrEmpty(message.turnId),
+    kind: stringOrEmpty(message.kind) || "chat",
+    role: stringOrEmpty(message.role) || "system",
+    text,
+    createdAt: stringOrEmpty(message.createdAt) || new Date().toISOString(),
+  };
 }
 
 function buildTransientPlanMessage(transientPlanState) {
@@ -2067,6 +2293,32 @@ function approvalRequestKind(method) {
     default:
       return "commandApproval";
   }
+}
+
+function liveMessageId(kind, params = {}) {
+  const threadId = stringOrEmpty(params.threadId);
+  const turnId = stringOrEmpty(params.turnId || params.id);
+  const itemId = stringOrEmpty(params.itemId);
+  const callId = stringOrEmpty(params.call_id || params.callId);
+  return [
+    "live",
+    kind,
+    threadId || "thread",
+    turnId || "turn",
+    itemId || callId || "item",
+  ].join(":");
+}
+
+function formatLiveCommandText(command, status, output) {
+  const parts = [`$ ${command}`];
+  const normalizedStatus = stringOrEmpty(status);
+  if (normalizedStatus) {
+    parts.push(`[${normalizedStatus}]`);
+  }
+  if (stringOrEmpty(output)) {
+    parts.push(output);
+  }
+  return parts.join("\n");
 }
 
 function clonePlainObject(value) {
@@ -2489,6 +2741,10 @@ function normalizeThreadTitle(value) {
 
 function stringOrEmpty(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function stringPreserveWhitespace(value) {
+  return typeof value === "string" ? value : "";
 }
 
 function decodeTimestamp(rawValue) {
