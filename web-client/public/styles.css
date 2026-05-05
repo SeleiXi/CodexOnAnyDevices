@@ -975,6 +975,7 @@ button:disabled {
 .message-pane {
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1011,6 +1012,7 @@ button:disabled {
   flex: 1 1 auto;
   overflow: auto;
   min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -1024,6 +1026,7 @@ button:disabled {
   width: min(100%, var(--message-max-width));
   max-width: min(100%, var(--message-max-width));
   flex: 0 0 auto;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -1088,7 +1091,9 @@ button:disabled {
 
 .message-kind,
 .approval-detail-label {
+  min-width: 0;
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .message-time {
@@ -1494,14 +1499,33 @@ button:disabled {
   }
 
   .composer-secondary {
-    flex-wrap: nowrap;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+    flex-wrap: initial;
     overflow: visible;
     padding-bottom: 0;
   }
 
   .composer-secondary > * {
-    flex: 0 0 auto;
     min-width: 0;
+  }
+
+  .composer-secondary .access-mode-button {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .model-button,
+  .plan-button {
+    min-width: 0;
+  }
+
+  .access-mode-button strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .message-card,
@@ -1595,6 +1619,10 @@ button:disabled {
 
   .composer-secondary {
     gap: 6px;
+  }
+
+  .access-mode-menu {
+    max-width: calc(100vw - 48px);
   }
 
   .access-mode-button {
