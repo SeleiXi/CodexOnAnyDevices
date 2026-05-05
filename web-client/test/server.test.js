@@ -1,5 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { EventEmitter } = require("node:events");
 
 const {
   RemodexWebClient,
@@ -22,13 +23,30 @@ function rpcError(message, code = -32602) {
 function createClientStub() {
   const client = Object.create(RemodexWebClient.prototype);
   client.pendingRequests = new Map();
+  client.pendingControlWaiters = new Set();
   client.pendingApproval = null;
   client.pendingServerRequest = null;
   client.lastPlanModeDowngrade = null;
   client.lastModelReroute = null;
+  client.lastDisconnect = null;
+  client.isConnected = false;
+  client.isInitialized = false;
   client.supportsTurnCollaborationMode = true;
   client.transientPlanStateByThread = new Map();
+  client.transientLiveMessagesByThread = new Map();
+  client.connectionOperation = Promise.resolve();
   return client;
+}
+
+function createSocketStub() {
+  const socket = new EventEmitter();
+  socket.off = socket.removeListener.bind(socket);
+  socket.readyState = 1;
+  socket.close = () => {
+    socket.readyState = 3;
+    socket.emit("close", 1000, Buffer.from("closed"));
+  };
+  return socket;
 }
 
 test.after(() => {
@@ -253,6 +271,27 @@ test("routeRpcMessage tracks typed requests, clears resolved requests, and store
   });
 
   assert.equal(client.pendingServerRequest, null);
+});
+
+test("stale socket close events do not clear a newer bridge connection", () => {
+  const client = createClientStub();
+  const oldSocket = createSocketStub();
+  const newSocket = createSocketStub();
+
+  client.socket = oldSocket;
+  client.attachSocketHandlers(oldSocket);
+  client.socket = newSocket;
+  client.attachSocketHandlers(newSocket);
+
+  oldSocket.emit("close", 1006, Buffer.from("stale"));
+
+  assert.equal(client.socket, newSocket);
+  assert.equal(client.isConnected, false);
+  assert.equal(client.lastDisconnect, null);
+
+  newSocket.emit("close", 1006, Buffer.from("live"));
+  assert.equal(client.socket, null);
+  assert.equal(client.lastDisconnect.reason, "live");
 });
 
 test("buildServerRequestResponsePayload encodes typed response shapes", () => {

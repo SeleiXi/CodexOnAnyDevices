@@ -42,6 +42,7 @@ const SECURE_SENDER_IPHONE = "iphone";
 const SECURE_SENDER_MAC = "mac";
 const THREAD_LIST_SOURCE_KINDS = ["cli", "vscode", "appServer", "exec", "unknown"];
 const CONTROL_MESSAGE_TIMEOUT_MS = 15_000;
+const RELAY_CONNECT_TIMEOUT_MS = 10_000;
 const MAX_BODY_BYTES = 1024 * 1024;
 const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
 const CODEX_GLOBAL_STATE_FILE = path.join(CODEX_HOME, ".codex-global-state.json");
@@ -67,6 +68,7 @@ class RemodexWebClient {
     this.supportsTurnCollaborationMode = true;
     this.lastPlanModeDowngrade = null;
     this.lastModelReroute = null;
+    this.connectionOperation = Promise.resolve();
     this.transientPlanStateByThread = new Map();
   }
 
@@ -88,8 +90,11 @@ class RemodexWebClient {
 
   async connect(pairingPayload) {
     const payload = validatePairingPayload(pairingPayload);
-    await this.disconnect();
+    return this.runConnectionOperation(() => this.connectUnlocked(payload));
+  }
 
+  async connectUnlocked(payload) {
+    await this.disconnectUnlocked();
     this.pairingPayload = payload;
     this.pendingApproval = null;
     this.pendingServerRequest = null;
@@ -121,6 +126,17 @@ class RemodexWebClient {
   }
 
   async disconnect() {
+    return this.runConnectionOperation(() => this.disconnectUnlocked());
+  }
+
+  async runConnectionOperation(operation) {
+    const previousOperation = this.connectionOperation.catch(() => null);
+    const nextOperation = previousOperation.then(operation, operation);
+    this.connectionOperation = nextOperation.catch(() => null);
+    return nextOperation;
+  }
+
+  async disconnectUnlocked() {
     const socket = this.socket;
     this.socket = null;
     this.isConnected = false;
@@ -167,6 +183,9 @@ class RemodexWebClient {
     });
 
     socket.on("close", (code, reason) => {
+      if (this.socket !== socket) {
+        return;
+      }
       this.lastDisconnect = {
         code,
         reason: reason ? reason.toString("utf8") : "",
@@ -188,6 +207,9 @@ class RemodexWebClient {
     });
 
     socket.on("error", (error) => {
+      if (this.socket !== socket) {
+        return;
+      }
       this.lastDisconnect = {
         code: 0,
         reason: error.message,
@@ -2067,6 +2089,7 @@ function openWebSocket(url, options) {
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(url, options);
     const cleanup = () => {
+      clearTimeout(timeout);
       socket.off("open", onOpen);
       socket.off("error", onError);
     };
@@ -2078,6 +2101,16 @@ function openWebSocket(url, options) {
       cleanup();
       reject(error);
     };
+    const timeout = setTimeout(() => {
+      cleanup();
+      try {
+        socket.terminate();
+      } catch {
+        // best effort
+      }
+      reject(new Error("Relay connection timed out"));
+    }, RELAY_CONNECT_TIMEOUT_MS);
+    timeout.unref?.();
     socket.once("open", onOpen);
     socket.once("error", onError);
   });
