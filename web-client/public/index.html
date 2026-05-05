@@ -107,6 +107,43 @@
                 placeholder="Search conversations"
               />
             </label>
+
+            <div class="sidebar-action-grid">
+              <button id="new-thread-button" class="new-chat-button" type="button">
+                <span class="new-chat-icon">+</span>
+                <span>New Chat</span>
+              </button>
+              <button id="new-project-button" class="ghost-button sidebar-secondary-button" type="button">
+                New Project
+              </button>
+            </div>
+
+            <form id="project-launcher" class="project-launcher glass-panel" hidden>
+              <label class="field">
+                <span>Project Directory</span>
+                <input
+                  id="project-launcher-input"
+                  type="text"
+                  placeholder="~/coding/my-app"
+                  autocomplete="off"
+                />
+              </label>
+
+              <p class="support-copy project-launcher-caption">
+                Type a server path. Suggestions come from directories on this machine.
+              </p>
+
+              <div id="project-suggestion-list" class="project-suggestion-list"></div>
+
+              <div class="project-launcher-actions">
+                <button id="project-launcher-cancel" class="ghost-button compact" type="button">
+                  Cancel
+                </button>
+                <button id="project-launcher-submit" class="primary-button compact" type="submit">
+                  Create Project Chat
+                </button>
+              </div>
+            </form>
           </div>
 
           <div id="thread-list" class="thread-list"></div>

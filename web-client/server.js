@@ -45,6 +45,8 @@ const CONTROL_MESSAGE_TIMEOUT_MS = 15_000;
 const MAX_BODY_BYTES = 1024 * 1024;
 const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
 const CODEX_GLOBAL_STATE_FILE = path.join(CODEX_HOME, ".codex-global-state.json");
+const PROJECT_SUGGESTION_LIMIT = Number.parseInt(process.env.REMODEX_WEB_PROJECT_SUGGESTION_LIMIT || "12", 10);
+const PROJECT_HINT_ROOT_NAMES = ["coding", "projects", "work", "workspace", "src"];
 
 class RemodexWebClient {
   constructor() {
@@ -1159,9 +1161,21 @@ async function handleApiRequest(req, res, url) {
     return;
   }
 
+  if (req.method === "GET" && url.pathname === "/api/project-suggestions") {
+    const suggestions = listProjectSuggestions(url.searchParams.get("q") || "", PROJECT_SUGGESTION_LIMIT);
+    writeJson(res, 200, {
+      ok: true,
+      suggestions,
+    });
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/api/threads") {
     const body = await readJsonBody(req);
-    const thread = await client.createThread(body || {});
+    const thread = await client.createThread({
+      ...(body || {}),
+      cwd: resolveRequestedProjectPath(body?.cwd || ""),
+    });
     writeJson(res, 200, {
       ok: true,
       thread,
@@ -1184,7 +1198,10 @@ async function handleApiRequest(req, res, url) {
   if (req.method === "POST" && turnMatch) {
     const threadId = decodeURIComponent(turnMatch[1]);
     const body = await readJsonBody(req);
-    const result = await client.startTurn(threadId, body.text || "", body || {});
+    const result = await client.startTurn(threadId, body.text || "", {
+      ...(body || {}),
+      cwd: resolveRequestedProjectPath(body?.cwd || ""),
+    });
     writeJson(res, 200, {
       ok: true,
       result,
@@ -1359,6 +1376,193 @@ function parseEnvList(value) {
     .split(",")
     .map((entry) => entry.trim())
     .filter(Boolean);
+}
+
+function resolveRequestedProjectPath(rawPath) {
+  const normalizedPath = normalizeProjectPath(rawPath);
+  if (!normalizedPath) {
+    return "";
+  }
+
+  const stats = safeStat(normalizedPath);
+  if (!stats || !stats.isDirectory()) {
+    const error = new Error(`Project directory does not exist on this server: ${normalizedPath}`);
+    error.status = 400;
+    error.code = "project_path_missing";
+    throw error;
+  }
+
+  return normalizedPath;
+}
+
+function normalizeProjectPath(rawPath) {
+  const trimmed = String(rawPath || "").trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  let expanded = trimmed;
+  if (expanded === "~") {
+    expanded = os.homedir();
+  } else if (expanded.startsWith("~/")) {
+    expanded = path.join(os.homedir(), expanded.slice(2));
+  }
+
+  if (!path.isAbsolute(expanded)) {
+    expanded = path.resolve(os.homedir(), expanded);
+  }
+
+  return path.normalize(expanded);
+}
+
+function listProjectSuggestions(rawQuery, limit = 12) {
+  const normalizedLimit = Number.isFinite(Number(limit)) ? Math.max(1, Number(limit)) : 12;
+  const query = String(rawQuery || "").trim();
+  if (!query) {
+    return buildDefaultProjectSuggestions(normalizedLimit);
+  }
+
+  const normalizedQuery = normalizeProjectPath(query);
+  const exactDir = directoryExists(normalizedQuery) ? normalizedQuery : "";
+  const treatAsDirectory = /[/\\]$/.test(query) || Boolean(exactDir);
+  const searchRoot = treatAsDirectory ? normalizedQuery : path.dirname(normalizedQuery);
+  const prefix = treatAsDirectory ? "" : path.basename(normalizedQuery);
+  const suggestions = [];
+
+  if (exactDir) {
+    suggestions.push(makeProjectSuggestion(exactDir, "selected"));
+  }
+
+  if (directoryExists(searchRoot)) {
+    const entries = fs.readdirSync(searchRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .filter((entry) => shouldIncludeSuggestionEntry(entry.name, prefix))
+      .sort((left, right) => left.name.localeCompare(right.name));
+
+    for (const entry of entries) {
+      suggestions.push(makeProjectSuggestion(path.join(searchRoot, entry.name), "directory"));
+      if (suggestions.length >= normalizedLimit) {
+        break;
+      }
+    }
+  }
+
+  return dedupeProjectSuggestions(suggestions, normalizedLimit);
+}
+
+function buildDefaultProjectSuggestions(limit) {
+  const homeDir = os.homedir();
+  const parentDir = path.dirname(REPO_DIR);
+  const seedPaths = [
+    REPO_DIR,
+    parentDir,
+    homeDir,
+    ...PROJECT_HINT_ROOT_NAMES.map((name) => path.join(homeDir, name)),
+  ];
+  const suggestions = [];
+
+  for (const seedPath of seedPaths) {
+    if (!directoryExists(seedPath)) {
+      continue;
+    }
+
+    suggestions.push(makeProjectSuggestion(seedPath, seedPath === REPO_DIR ? "current" : "root"));
+    if (suggestions.length >= limit) {
+      return dedupeProjectSuggestions(suggestions, limit);
+    }
+  }
+
+  const codingRoot = path.join(homeDir, "coding");
+  if (directoryExists(codingRoot)) {
+    const projectDirectories = fs.readdirSync(codingRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .sort((left, right) => left.name.localeCompare(right.name));
+
+    for (const entry of projectDirectories) {
+      suggestions.push(makeProjectSuggestion(path.join(codingRoot, entry.name), "project"));
+      if (suggestions.length >= limit) {
+        break;
+      }
+    }
+  }
+
+  return dedupeProjectSuggestions(suggestions, limit);
+}
+
+function dedupeProjectSuggestions(suggestions, limit) {
+  const deduped = [];
+  const seen = new Set();
+
+  for (const suggestion of suggestions) {
+    const suggestionPath = String(suggestion?.path || "");
+    if (!suggestionPath || seen.has(suggestionPath)) {
+      continue;
+    }
+    seen.add(suggestionPath);
+    deduped.push(suggestion);
+    if (deduped.length >= limit) {
+      break;
+    }
+  }
+
+  return deduped;
+}
+
+function shouldIncludeSuggestionEntry(name, prefix) {
+  if (!name) {
+    return false;
+  }
+
+  const trimmedPrefix = String(prefix || "").trim().toLowerCase();
+  const isHidden = name.startsWith(".");
+  if (isHidden && !trimmedPrefix.startsWith(".")) {
+    return false;
+  }
+  if (!trimmedPrefix) {
+    return true;
+  }
+
+  return name.toLowerCase().includes(trimmedPrefix);
+}
+
+function makeProjectSuggestion(targetPath, kind = "directory") {
+  const normalizedPath = path.normalize(targetPath);
+  const label = path.basename(normalizedPath) || normalizedPath;
+
+  return {
+    path: normalizedPath,
+    label,
+    kind,
+    detail: describeProjectSuggestion(kind, normalizedPath),
+  };
+}
+
+function describeProjectSuggestion(kind, targetPath) {
+  switch (kind) {
+    case "current":
+      return `Current repo · ${targetPath}`;
+    case "root":
+      return `Workspace root · ${targetPath}`;
+    case "project":
+      return `Project under ~/coding · ${targetPath}`;
+    case "selected":
+      return `Use this directory · ${targetPath}`;
+    default:
+      return `Directory on this server · ${targetPath}`;
+  }
+}
+
+function directoryExists(targetPath) {
+  const stats = safeStat(targetPath);
+  return Boolean(stats && stats.isDirectory());
+}
+
+function safeStat(targetPath) {
+  try {
+    return fs.statSync(targetPath);
+  } catch {
+    return null;
+  }
 }
 
 function pairPayloadForWeb(pairingPayload) {

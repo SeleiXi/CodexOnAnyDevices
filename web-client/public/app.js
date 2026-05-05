@@ -24,6 +24,10 @@ const state = {
   messages: [],
   lastRenderedThreadId: "",
   forceScrollToBottom: false,
+  isProjectLauncherOpen: false,
+  isLoadingProjectSuggestions: false,
+  projectSuggestions: [],
+  projectSuggestionRequestId: 0,
   statusPoller: null,
   threadPoller: null,
   messagePoller: null,
@@ -54,6 +58,13 @@ const elements = {
   sidebarTools: document.querySelector("#sidebar-tools"),
   threadSearchInput: document.querySelector("#thread-search-input"),
   threadList: document.querySelector("#thread-list"),
+  newThreadButton: document.querySelector("#new-thread-button"),
+  newProjectButton: document.querySelector("#new-project-button"),
+  projectLauncher: document.querySelector("#project-launcher"),
+  projectLauncherForm: document.querySelector("#project-launcher"),
+  projectLauncherInput: document.querySelector("#project-launcher-input"),
+  projectSuggestionList: document.querySelector("#project-suggestion-list"),
+  projectLauncherCancel: document.querySelector("#project-launcher-cancel"),
   threadTitle: document.querySelector("#thread-title"),
   threadSubtitle: document.querySelector("#thread-subtitle"),
   connectionBadge: document.querySelector("#connection-badge"),
@@ -136,6 +147,16 @@ function bindEvents() {
     state.searchQuery = elements.threadSearchInput.value.trim().toLowerCase();
     renderThreads();
   });
+  elements.newThreadButton?.addEventListener("click", () => {
+    void createThreadAndSelect();
+  });
+  elements.newProjectButton?.addEventListener("click", openProjectLauncher);
+  elements.projectLauncherForm?.addEventListener("submit", createProjectThreadFromLauncher);
+  elements.projectLauncherInput?.addEventListener("input", () => {
+    setProjectPath(elements.projectLauncherInput.value);
+    void refreshProjectSuggestions(elements.projectLauncherInput.value);
+  });
+  elements.projectLauncherCancel?.addEventListener("click", closeProjectLauncher);
   elements.homePrimaryButton.addEventListener("click", handleHomePrimaryAction);
   elements.homeSecondaryButton.addEventListener("click", handleHomeSecondaryAction);
   elements.statusBannerAction.addEventListener("click", handleBannerAction);
@@ -151,7 +172,10 @@ function bindEvents() {
   elements.connectButton.addEventListener("click", connectBridge);
   elements.disconnectButton.addEventListener("click", disconnectBridge);
   elements.accessMode.addEventListener("change", renderComposerMeta);
-  elements.projectPath.addEventListener("input", renderComposerMeta);
+  elements.projectPath.addEventListener("input", () => {
+    setProjectPath(elements.projectPath.value);
+    void refreshProjectSuggestions(elements.projectPath.value);
+  });
   elements.saveSecurityButton.addEventListener("click", saveSecurityPolicy);
   elements.useCloudflareButton.addEventListener("click", applyCloudflareDefaults);
   window.addEventListener("keydown", (event) => {
@@ -160,6 +184,10 @@ function bindEvents() {
     }
     if (event.key === "Escape" && state.sidebarOpen) {
       closeSidebar();
+      return;
+    }
+    if (event.key === "Escape" && state.isProjectLauncherOpen) {
+      closeProjectLauncher();
     }
   });
   document.addEventListener("click", handleGlobalClick);
@@ -237,6 +265,9 @@ function leaveAuthenticatedMode(message = "") {
   state.messages = [];
   state.lastRenderedThreadId = "";
   state.forceScrollToBottom = false;
+  state.isProjectLauncherOpen = false;
+  state.isLoadingProjectSuggestions = false;
+  state.projectSuggestions = [];
   state.serverRequestDrafts = {};
   state.currentView = "chat";
   state.sidebarOpen = false;
@@ -333,7 +364,9 @@ function closeSidebar() {
     return;
   }
   state.sidebarOpen = false;
+  state.isProjectLauncherOpen = false;
   renderSidebarShell();
+  renderProjectLauncher();
 }
 
 function setCurrentView(view) {
@@ -745,6 +778,7 @@ function renderChrome() {
   renderBanner();
   renderApproval();
   renderComposerMeta();
+  renderProjectLauncher();
   renderSecurityState();
   renderHomeState();
   renderMessages();
@@ -877,7 +911,7 @@ function renderThreads() {
       pinButton.className = `thread-pin-indicator ${thread.pinned ? "is-pinned" : ""}`;
       pinButton.setAttribute("aria-label", thread.pinned ? "Unpin thread" : "Pin thread");
       pinButton.setAttribute("title", thread.pinned ? "Unpin thread" : "Pin thread");
-      pinButton.textContent = "📌";
+      pinButton.textContent = "??";
       pinButton.addEventListener("click", async (event) => {
         event.stopPropagation();
         await toggleThreadPin(thread.id);
@@ -1123,6 +1157,155 @@ function renderComposerMeta() {
     state.planModeArmed ? "Plan mode armed for the next turn" : "Plan mode is off"
   );
   elements.planSummary.textContent = state.planModeArmed ? "Plan Next" : "Plan";
+}
+
+function setProjectPath(value) {
+  const nextValue = String(value || "");
+  if (elements.projectPath.value !== nextValue) {
+    elements.projectPath.value = nextValue;
+  }
+  if (elements.projectLauncherInput?.value !== nextValue) {
+    elements.projectLauncherInput.value = nextValue;
+  }
+  renderComposerMeta();
+}
+
+function openProjectLauncher() {
+  if (!isBridgeConnected()) {
+    showAppError("Connect the bridge before creating a project chat.");
+    setCurrentView("connection");
+    return;
+  }
+
+  if (isCompactLayout()) {
+    state.sidebarOpen = true;
+    renderSidebarShell();
+  }
+  state.isProjectLauncherOpen = true;
+  setProjectPath(resolvePreferredProjectPath(elements.projectPath.value));
+  renderProjectLauncher();
+  void refreshProjectSuggestions(elements.projectPath.value);
+  window.setTimeout(() => elements.projectLauncherInput?.focus(), 0);
+}
+
+function closeProjectLauncher() {
+  state.isProjectLauncherOpen = false;
+  renderProjectLauncher();
+}
+
+async function createProjectThreadFromLauncher(event) {
+  event.preventDefault();
+  const preferredProjectPath = elements.projectLauncherInput.value.trim();
+  if (!preferredProjectPath) {
+    showAppError("Choose a project directory first.");
+    elements.projectLauncherInput.focus();
+    return;
+  }
+
+  clearAppError();
+  await createThreadAndSelect({ preferredProjectPath });
+  if (state.activeThreadId) {
+    closeProjectLauncher();
+    closeSidebar();
+  }
+}
+
+async function refreshProjectSuggestions(rawQuery = "") {
+  const requestId = state.projectSuggestionRequestId + 1;
+  state.projectSuggestionRequestId = requestId;
+  state.isLoadingProjectSuggestions = true;
+  renderProjectLauncher();
+
+  try {
+    const response = await api(`/api/project-suggestions?q=${encodeURIComponent(rawQuery || "")}`);
+    if (requestId !== state.projectSuggestionRequestId) {
+      return;
+    }
+    state.projectSuggestions = normalizeProjectSuggestions(response.suggestions || []);
+  } catch {
+    if (requestId !== state.projectSuggestionRequestId) {
+      return;
+    }
+    state.projectSuggestions = normalizeProjectSuggestions([]);
+  } finally {
+    if (requestId === state.projectSuggestionRequestId) {
+      state.isLoadingProjectSuggestions = false;
+      renderProjectLauncher();
+    }
+  }
+}
+
+function normalizeProjectSuggestions(filesystemSuggestions) {
+  const normalized = [];
+  const seen = new Set();
+
+  for (const suggestion of filesystemSuggestions) {
+    const suggestionPath = String(suggestion?.path || "").trim();
+    if (!suggestionPath || seen.has(suggestionPath)) {
+      continue;
+    }
+
+    seen.add(suggestionPath);
+    normalized.push({
+      kind: suggestion.kind || "directory",
+      label: suggestion.label || baseName(suggestionPath),
+      detail: suggestion.detail || suggestionPath,
+      path: suggestionPath,
+    });
+
+    if (normalized.length >= 12) {
+      break;
+    }
+  }
+
+  return normalized;
+}
+
+function renderProjectLauncher() {
+  if (!elements.projectLauncher) {
+    return;
+  }
+
+  elements.projectLauncher.hidden = !state.isProjectLauncherOpen;
+  if (!state.isProjectLauncherOpen) {
+    return;
+  }
+
+  elements.projectSuggestionList.innerHTML = "";
+
+  if (state.isLoadingProjectSuggestions) {
+    elements.projectSuggestionList.innerHTML = "<p class=\"project-suggestion-empty\">Loading server directories...</p>";
+    return;
+  }
+
+  if (state.projectSuggestions.length === 0) {
+    const query = elements.projectLauncherInput.value.trim();
+    elements.projectSuggestionList.innerHTML = `<p class="project-suggestion-empty">${
+      query
+        ? "No matching directories on this server yet."
+        : "Type a path like ~/coding/app to browse server directories."
+    }</p>`;
+    return;
+  }
+
+  for (const suggestion of state.projectSuggestions) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "project-suggestion-button";
+    button.innerHTML = `
+      <span class="project-suggestion-top">
+        <strong>${escapeHTML(suggestion.label || baseName(suggestion.path))}</strong>
+        <span class="project-suggestion-kind">${escapeHTML(suggestion.kind || "directory")}</span>
+      </span>
+      <span class="project-suggestion-detail">${escapeHTML(suggestion.detail || suggestion.path)}</span>
+    `;
+    button.addEventListener("click", () => {
+      clearAppError();
+      setProjectPath(suggestion.path);
+      void refreshProjectSuggestions(suggestion.path);
+    });
+    elements.projectSuggestionList.appendChild(button);
+  }
 }
 
 function renderModelMenu() {
@@ -1753,7 +1936,7 @@ function describeThreadRow(thread) {
   } else {
     parts.push(thread.id);
   }
-  return parts.filter(Boolean).join(" · ");
+  return parts.filter(Boolean).join(" ? ");
 }
 
 function isPinnedThread(threadId, thread = null) {
@@ -1794,7 +1977,7 @@ function describeActiveThreadSubtitle(thread) {
   if (!parts.length && thread.id) {
     parts.push(thread.id);
   }
-  return parts.join(" · ");
+  return parts.join(" ? ");
 }
 
 function connectionPhase() {
@@ -1892,7 +2075,7 @@ function shortDeviceId(value) {
   if (text.length <= 12) {
     return text;
   }
-  return `${text.slice(0, 8)}…${text.slice(-4)}`;
+  return `${text.slice(0, 8)}??{text.slice(-4)}`;
 }
 
 function baseName(value) {
