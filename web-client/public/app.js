@@ -34,6 +34,8 @@ const state = {
   serverRequestDrafts: {},
 };
 
+const DEFAULT_PAIRING_RETRY_DELAYS_MS = [800, 1600];
+
 const elements = {
   authScreen: document.querySelector("#auth-screen"),
   authStatus: document.querySelector("#auth-status"),
@@ -231,7 +233,7 @@ async function enterAuthenticatedMode() {
   await refreshStatus();
   await refreshSecurity();
   await refreshRuntimeConfig();
-  const pairingPayload = await loadDefaultPairing();
+  const pairingPayload = await loadDefaultPairing({ retryOnFailure: true });
   if (!state.status?.isConnected) {
     const autoConnected = await maybeAutoConnect(pairingPayload);
     state.currentView = autoConnected ? "chat" : "connection";
@@ -497,16 +499,29 @@ async function loadDefaultPairing(options = {}) {
   if (!state.authenticated) {
     return null;
   }
-  try {
-    const query = options.forceRefresh ? "?refresh=1" : "";
-    const response = await api(`/api/pairing/default${query}`);
-    elements.pairingJson.value = JSON.stringify(response.pairingPayload, null, 2);
-    renderHomeState();
-    return response.pairingPayload || null;
-  } catch (error) {
-    showAppError(error.message);
-    return null;
+  const retryDelays = options.retryOnFailure ? DEFAULT_PAIRING_RETRY_DELAYS_MS : [];
+  for (let attempt = 0; attempt <= retryDelays.length; attempt += 1) {
+    try {
+      const query = options.forceRefresh ? "?refresh=1" : "";
+      const response = await api(`/api/pairing/default${query}`);
+      elements.pairingJson.value = JSON.stringify(response.pairingPayload, null, 2);
+      renderHomeState();
+      return response.pairingPayload || null;
+    } catch (error) {
+      if (attempt >= retryDelays.length) {
+        showAppError(error.message);
+        return null;
+      }
+      await delay(retryDelays[attempt]);
+    }
   }
+  return null;
+}
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }
 
 async function connectBridge(options = {}) {
