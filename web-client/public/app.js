@@ -1350,6 +1350,30 @@ function renderModelMenu() {
     });
     elements.modelMenu.appendChild(button);
   }
+
+  const selectedModelId = String(state.selectedModelId || "").trim();
+  const customValue = selectedModelId && !selectedModelOption() ? selectedModelId : "";
+  const customForm = document.createElement("form");
+  customForm.className = "model-custom-form";
+  customForm.innerHTML = `
+    <label class="model-custom-label">
+      <span>Custom model id</span>
+      <input class="model-custom-input" type="text" value="${escapeAttribute(customValue)}" placeholder="model id" autocomplete="off" />
+    </label>
+    <button class="ghost-button compact" type="submit">Use</button>
+  `;
+  customForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const input = customForm.querySelector(".model-custom-input");
+    const modelId = String(input?.value || "").trim();
+    if (!modelId) {
+      showAppError("Enter a model id first.");
+      return;
+    }
+    await setSelectedModel(modelId);
+    setModelMenuOpen(false);
+  });
+  elements.modelMenu.appendChild(customForm);
 }
 
 function renderReasoningMenu() {
@@ -2147,6 +2171,12 @@ function escapeHTML(value) {
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
+}
+
+function escapeAttribute(value) {
+  return escapeHTML(value)
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function formatTimestamp(value) {

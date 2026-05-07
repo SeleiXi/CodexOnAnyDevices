@@ -1365,6 +1365,10 @@ button:disabled {
   z-index: 15;
 }
 
+.composer-model-control .access-mode-menu {
+  min-width: 280px;
+}
+
 .access-mode-option {
   display: grid;
   gap: 4px;
@@ -1391,6 +1395,36 @@ button:disabled {
 .access-mode-option.selected {
   background: rgba(15, 23, 32, 0.08);
   font-weight: 600;
+}
+
+.model-custom-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+  margin-top: 4px;
+  padding: 10px;
+  border-top: 1px solid rgba(15, 23, 32, 0.08);
+}
+
+.model-custom-label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.model-custom-input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 6px 9px;
+  border: 1px solid rgba(15, 23, 32, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.8);
+  color: var(--text);
+  font: inherit;
 }
 
 .connection-page {
