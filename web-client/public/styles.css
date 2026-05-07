@@ -675,6 +675,8 @@ button:disabled {
   display: grid;
   gap: 4px;
   min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   margin-bottom: 14px;
 }
 
@@ -688,6 +690,8 @@ button:disabled {
   font-family: var(--font-mono);
   font-size: 0.72rem;
   text-transform: uppercase;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .thread-group-heading-label {
@@ -697,6 +701,7 @@ button:disabled {
   gap: 10px;
   flex: 1;
   min-width: 0;
+  overflow: hidden;
 }
 
 .thread-group-heading-label span:first-child {
@@ -724,6 +729,8 @@ button:disabled {
   gap: 8px;
   width: 100%;
   min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   border-radius: var(--radius-sm);
 }
 
@@ -735,7 +742,10 @@ button:disabled {
   display: grid;
   gap: 6px;
   flex: 1;
+  width: 100%;
   min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   padding: 12px 14px;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -763,6 +773,7 @@ button:disabled {
   display: -webkit-box;
   overflow: hidden;
   overflow-wrap: anywhere;
+  word-break: break-word;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
