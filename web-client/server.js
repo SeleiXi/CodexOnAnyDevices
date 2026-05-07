@@ -42,9 +42,12 @@ const SECURE_SENDER_IPHONE = "iphone";
 const SECURE_SENDER_MAC = "mac";
 const THREAD_LIST_SOURCE_KINDS = ["cli", "vscode", "appServer", "exec", "unknown"];
 const CONTROL_MESSAGE_TIMEOUT_MS = 15_000;
+const RELAY_CONNECT_TIMEOUT_MS = 10_000;
 const MAX_BODY_BYTES = 1024 * 1024;
 const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
 const CODEX_GLOBAL_STATE_FILE = path.join(CODEX_HOME, ".codex-global-state.json");
+const PROJECT_SUGGESTION_LIMIT = Number.parseInt(process.env.REMODEX_WEB_PROJECT_SUGGESTION_LIMIT || "12", 10);
+const PROJECT_HINT_ROOT_NAMES = ["coding", "projects", "work", "workspace", "src"];
 
 class RemodexWebClient {
   constructor() {
@@ -65,7 +68,9 @@ class RemodexWebClient {
     this.supportsTurnCollaborationMode = true;
     this.lastPlanModeDowngrade = null;
     this.lastModelReroute = null;
+    this.connectionOperation = Promise.resolve();
     this.transientPlanStateByThread = new Map();
+    this.transientLiveMessagesByThread = new Map();
   }
 
   status() {
@@ -86,8 +91,11 @@ class RemodexWebClient {
 
   async connect(pairingPayload) {
     const payload = validatePairingPayload(pairingPayload);
-    await this.disconnect();
+    return this.runConnectionOperation(() => this.connectUnlocked(payload));
+  }
 
+  async connectUnlocked(payload) {
+    await this.disconnectUnlocked();
     this.pairingPayload = payload;
     this.pendingApproval = null;
     this.pendingServerRequest = null;
@@ -96,6 +104,7 @@ class RemodexWebClient {
     this.lastPlanModeDowngrade = null;
     this.lastModelReroute = null;
     this.transientPlanStateByThread.clear();
+    this.transientLiveMessagesByThread.clear();
 
     const relayURL = new URL(`${payload.relay.replace(/\/+$/, "")}/${payload.sessionId}`);
     const socket = await openWebSocket(relayURL.toString(), {
@@ -119,6 +128,17 @@ class RemodexWebClient {
   }
 
   async disconnect() {
+    return this.runConnectionOperation(() => this.disconnectUnlocked());
+  }
+
+  async runConnectionOperation(operation) {
+    const previousOperation = this.connectionOperation.catch(() => null);
+    const nextOperation = previousOperation.then(operation, operation);
+    this.connectionOperation = nextOperation.catch(() => null);
+    return nextOperation;
+  }
+
+  async disconnectUnlocked() {
     const socket = this.socket;
     this.socket = null;
     this.isConnected = false;
@@ -130,6 +150,7 @@ class RemodexWebClient {
     this.lastPlanModeDowngrade = null;
     this.lastModelReroute = null;
     this.transientPlanStateByThread.clear();
+    this.transientLiveMessagesByThread.clear();
 
     if (!socket) {
       return;
@@ -165,6 +186,9 @@ class RemodexWebClient {
     });
 
     socket.on("close", (code, reason) => {
+      if (this.socket !== socket) {
+        return;
+      }
       this.lastDisconnect = {
         code,
         reason: reason ? reason.toString("utf8") : "",
@@ -175,6 +199,7 @@ class RemodexWebClient {
       this.pendingServerRequest = null;
       this.lastModelReroute = null;
       this.transientPlanStateByThread.clear();
+      this.transientLiveMessagesByThread.clear();
       this.rejectAllPending(new Error(`Relay closed (${code}) ${this.lastDisconnect.reason}`.trim()));
       rejectControlWaiters(
         this.pendingControlWaiters,
@@ -186,6 +211,9 @@ class RemodexWebClient {
     });
 
     socket.on("error", (error) => {
+      if (this.socket !== socket) {
+        return;
+      }
       this.lastDisconnect = {
         code: 0,
         reason: error.message,
@@ -374,17 +402,44 @@ class RemodexWebClient {
       .filter(Boolean);
   }
 
-  async listModels(limit = 50) {
-    const response = await this.sendRequest("model/list", {
-      cursor: null,
-      limit,
-      includeHidden: false,
-    });
-    const result = response.result || {};
-    const items = result.data || result.items || result.models || [];
-    const models = items.map(decodeModelOption).filter(Boolean);
-    this.cachedModels = models;
-    return models;
+  async listModels(options = {}) {
+    const pageSize = typeof options === "number"
+      ? options
+      : Number(options.pageSize || 100);
+    const limit = Number.isFinite(pageSize) && pageSize > 0 ? Math.floor(pageSize) : 100;
+    const includeHidden = typeof options === "object" && Boolean(options.includeHidden);
+    const maxPages = typeof options === "object" && Number.isFinite(Number(options.maxPages))
+      ? Math.max(1, Math.floor(Number(options.maxPages)))
+      : 20;
+    const models = [];
+    let cursor = null;
+    const seenCursors = new Set();
+
+    for (let page = 0; page < maxPages; page += 1) {
+      const response = await this.sendRequest("model/list", {
+        cursor,
+        limit,
+        includeHidden,
+      });
+      const result = response.result || {};
+      const items = result.data || result.items || result.models || [];
+      models.push(...items.map(decodeModelOption).filter(Boolean));
+
+      const nextCursor = stringOrEmpty(
+        result.nextCursor
+        || result.next_cursor
+        || result.next
+        || result.cursor
+      );
+      if (!nextCursor || seenCursors.has(nextCursor)) {
+        break;
+      }
+      seenCursors.add(nextCursor);
+      cursor = nextCursor;
+    }
+
+    this.cachedModels = dedupeModels(models);
+    return this.cachedModels;
   }
 
   async createThread({ cwd = "", accessMode = "full-access", model = "" } = {}) {
@@ -494,6 +549,7 @@ class RemodexWebClient {
           {
             pendingServerRequest: this.pendingServerRequest,
             transientPlanState: this.transientPlanStateByThread.get(threadId) || null,
+            transientLiveMessages: this.transientLiveMessagesByThread.get(threadId) || [],
           }
         ),
       };
@@ -515,6 +571,7 @@ class RemodexWebClient {
         messages: mergeTransientThreadMessages(threadId, [], {
           pendingServerRequest: this.pendingServerRequest,
           transientPlanState: this.transientPlanStateByThread.get(threadId) || null,
+          transientLiveMessages: this.transientLiveMessagesByThread.get(threadId) || [],
         }),
       };
     }
@@ -860,6 +917,82 @@ class RemodexWebClient {
       return;
     }
 
+    if (method === "turn/started") {
+      this.rememberTransientLiveMessage({
+        id: liveMessageId("thinking", params),
+        threadId: stringOrEmpty(params.threadId),
+        turnId: stringOrEmpty(params.turnId || params.id),
+        kind: "thinking",
+        role: "system",
+        text: "Working...",
+      });
+      return;
+    }
+
+    if (method === "item/reasoning/textDelta" || method === "item/plan/textDelta") {
+      this.rememberTransientLiveMessage({
+        id: stringOrEmpty(params.itemId) || liveMessageId("thinking", params),
+        threadId: stringOrEmpty(params.threadId),
+        turnId: stringOrEmpty(params.turnId),
+        kind: "thinking",
+        role: "system",
+        text: stringPreserveWhitespace(params.delta ?? params.text),
+      }, { append: true });
+      return;
+    }
+
+    if (method === "codex/event/agent_message") {
+      this.rememberTransientLiveMessage({
+        id: liveMessageId("assistant", params),
+        threadId: stringOrEmpty(params.threadId),
+        turnId: stringOrEmpty(params.turnId),
+        kind: "chat",
+        role: "assistant",
+        text: stringOrEmpty(params.message || params.text),
+      });
+      return;
+    }
+
+    if (method === "codex/event/exec_command_begin") {
+      this.rememberTransientCommand(params, {
+        status: "running",
+      });
+      return;
+    }
+
+    if (method === "codex/event/exec_command_output_delta") {
+      this.rememberTransientCommand(params, {
+        status: "running",
+        appendOutput: stringPreserveWhitespace(params.chunk ?? params.output),
+      });
+      return;
+    }
+
+    if (method === "codex/event/exec_command_end") {
+      this.rememberTransientCommand(params, {
+        status: stringOrEmpty(params.status) || "completed",
+        output: stringPreserveWhitespace(params.output),
+      });
+      return;
+    }
+
+    if (method === "codex/event/background_event") {
+      this.rememberTransientLiveMessage({
+        id: liveMessageId("tool", params),
+        threadId: stringOrEmpty(params.threadId),
+        turnId: stringOrEmpty(params.turnId),
+        kind: "tool",
+        role: "system",
+        text: stringOrEmpty(params.message) || "Tool activity",
+      });
+      return;
+    }
+
+    if (method === "turn/completed") {
+      this.pruneTransientLiveMessages(stringOrEmpty(params.threadId), stringOrEmpty(params.turnId || params.id));
+      return;
+    }
+
     if (method === "model/rerouted") {
       this.lastModelReroute = {
         threadId: stringOrEmpty(params.threadId),
@@ -869,6 +1002,89 @@ class RemodexWebClient {
         reason: stringOrEmpty(params.reason),
         occurredAt: new Date().toISOString(),
       };
+    }
+  }
+
+  rememberTransientCommand(params, { status = "running", appendOutput = "", output = null } = {}) {
+    const threadId = stringOrEmpty(params.threadId);
+    const command = stringOrEmpty(params.command) || "Command execution";
+    const messageId = liveMessageId("command", params);
+    const existing = this.findTransientLiveMessage(threadId, messageId);
+    const nextOutput = output !== null
+      ? output
+      : `${existing?.output || ""}${appendOutput || ""}`;
+
+    this.rememberTransientLiveMessage({
+      id: messageId,
+      threadId,
+      turnId: stringOrEmpty(params.turnId),
+      kind: "command",
+      role: "system",
+      text: formatLiveCommandText(command, status, nextOutput),
+      command,
+      output: nextOutput,
+      status,
+    });
+  }
+
+  rememberTransientLiveMessage(message, { append = false } = {}) {
+    const threadId = stringOrEmpty(message?.threadId);
+    const messageId = stringOrEmpty(message?.id);
+    if (!threadId || !messageId) {
+      return;
+    }
+
+    const messages = this.transientLiveMessagesByThread.get(threadId) || [];
+    const existingIndex = messages.findIndex((entry) => entry.id === messageId);
+    const now = new Date().toISOString();
+
+    if (existingIndex >= 0) {
+      const existing = messages[existingIndex];
+      messages[existingIndex] = {
+        ...existing,
+        ...message,
+        text: append ? `${existing.text || ""}${message.text || ""}` : (message.text || existing.text || ""),
+        createdAt: existing.createdAt || message.createdAt || now,
+        updatedAt: now,
+      };
+    } else {
+      messages.push({
+        threadId,
+        role: "system",
+        kind: "chat",
+        text: "",
+        createdAt: now,
+        ...message,
+        id: messageId,
+      });
+    }
+
+    this.transientLiveMessagesByThread.set(threadId, messages.slice(-40));
+  }
+
+  findTransientLiveMessage(threadId, messageId) {
+    const messages = this.transientLiveMessagesByThread.get(threadId) || [];
+    return messages.find((message) => message.id === messageId) || null;
+  }
+
+  pruneTransientLiveMessages(threadId, turnId) {
+    if (!threadId || !turnId) {
+      return;
+    }
+
+    const messages = this.transientLiveMessagesByThread.get(threadId) || [];
+    const now = Date.now();
+    const retained = messages.filter((message) => {
+      if (message.turnId !== turnId) {
+        return true;
+      }
+      const messageTime = decodeTimestamp(message.updatedAt || message.createdAt);
+      return messageTime ? now - messageTime.getTime() < 20_000 : false;
+    });
+    if (retained.length) {
+      this.transientLiveMessagesByThread.set(threadId, retained);
+    } else {
+      this.transientLiveMessagesByThread.delete(threadId);
     }
   }
 
@@ -1159,9 +1375,21 @@ async function handleApiRequest(req, res, url) {
     return;
   }
 
+  if (req.method === "GET" && url.pathname === "/api/project-suggestions") {
+    const suggestions = listProjectSuggestions(url.searchParams.get("q") || "", PROJECT_SUGGESTION_LIMIT);
+    writeJson(res, 200, {
+      ok: true,
+      suggestions,
+    });
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/api/threads") {
     const body = await readJsonBody(req);
-    const thread = await client.createThread(body || {});
+    const thread = await client.createThread({
+      ...(body || {}),
+      cwd: resolveRequestedProjectPath(body?.cwd || ""),
+    });
     writeJson(res, 200, {
       ok: true,
       thread,
@@ -1184,7 +1412,10 @@ async function handleApiRequest(req, res, url) {
   if (req.method === "POST" && turnMatch) {
     const threadId = decodeURIComponent(turnMatch[1]);
     const body = await readJsonBody(req);
-    const result = await client.startTurn(threadId, body.text || "", body || {});
+    const result = await client.startTurn(threadId, body.text || "", {
+      ...(body || {}),
+      cwd: resolveRequestedProjectPath(body?.cwd || ""),
+    });
     writeJson(res, 200, {
       ok: true,
       result,
@@ -1246,7 +1477,15 @@ function serveStaticFile(res, pathname) {
   res.statusCode = 200;
   res.setHeader("content-type", contentType);
   res.setHeader("cache-control", "no-store, max-age=0");
-  fs.createReadStream(resolvedPath).pipe(res);
+  const stream = fs.createReadStream(resolvedPath);
+  stream.on("error", () => {
+    if (!res.headersSent) {
+      writeText(res, 500, "Failed to read static asset");
+      return;
+    }
+    res.destroy();
+  });
+  stream.pipe(res);
 }
 
 function readJsonBody(req) {
@@ -1359,6 +1598,193 @@ function parseEnvList(value) {
     .split(",")
     .map((entry) => entry.trim())
     .filter(Boolean);
+}
+
+function resolveRequestedProjectPath(rawPath) {
+  const normalizedPath = normalizeProjectPath(rawPath);
+  if (!normalizedPath) {
+    return "";
+  }
+
+  const stats = safeStat(normalizedPath);
+  if (!stats || !stats.isDirectory()) {
+    const error = new Error(`Project directory does not exist on this server: ${normalizedPath}`);
+    error.status = 400;
+    error.code = "project_path_missing";
+    throw error;
+  }
+
+  return normalizedPath;
+}
+
+function normalizeProjectPath(rawPath) {
+  const trimmed = String(rawPath || "").trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  let expanded = trimmed;
+  if (expanded === "~") {
+    expanded = os.homedir();
+  } else if (expanded.startsWith("~/")) {
+    expanded = path.join(os.homedir(), expanded.slice(2));
+  }
+
+  if (!path.isAbsolute(expanded)) {
+    expanded = path.resolve(os.homedir(), expanded);
+  }
+
+  return path.normalize(expanded);
+}
+
+function listProjectSuggestions(rawQuery, limit = 12) {
+  const normalizedLimit = Number.isFinite(Number(limit)) ? Math.max(1, Number(limit)) : 12;
+  const query = String(rawQuery || "").trim();
+  if (!query) {
+    return buildDefaultProjectSuggestions(normalizedLimit);
+  }
+
+  const normalizedQuery = normalizeProjectPath(query);
+  const exactDir = directoryExists(normalizedQuery) ? normalizedQuery : "";
+  const treatAsDirectory = /[/\\]$/.test(query) || Boolean(exactDir);
+  const searchRoot = treatAsDirectory ? normalizedQuery : path.dirname(normalizedQuery);
+  const prefix = treatAsDirectory ? "" : path.basename(normalizedQuery);
+  const suggestions = [];
+
+  if (exactDir) {
+    suggestions.push(makeProjectSuggestion(exactDir, "selected"));
+  }
+
+  if (directoryExists(searchRoot)) {
+    const entries = fs.readdirSync(searchRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .filter((entry) => shouldIncludeSuggestionEntry(entry.name, prefix))
+      .sort((left, right) => left.name.localeCompare(right.name));
+
+    for (const entry of entries) {
+      suggestions.push(makeProjectSuggestion(path.join(searchRoot, entry.name), "directory"));
+      if (suggestions.length >= normalizedLimit) {
+        break;
+      }
+    }
+  }
+
+  return dedupeProjectSuggestions(suggestions, normalizedLimit);
+}
+
+function buildDefaultProjectSuggestions(limit) {
+  const homeDir = os.homedir();
+  const parentDir = path.dirname(REPO_DIR);
+  const seedPaths = [
+    REPO_DIR,
+    parentDir,
+    homeDir,
+    ...PROJECT_HINT_ROOT_NAMES.map((name) => path.join(homeDir, name)),
+  ];
+  const suggestions = [];
+
+  for (const seedPath of seedPaths) {
+    if (!directoryExists(seedPath)) {
+      continue;
+    }
+
+    suggestions.push(makeProjectSuggestion(seedPath, seedPath === REPO_DIR ? "current" : "root"));
+    if (suggestions.length >= limit) {
+      return dedupeProjectSuggestions(suggestions, limit);
+    }
+  }
+
+  const codingRoot = path.join(homeDir, "coding");
+  if (directoryExists(codingRoot)) {
+    const projectDirectories = fs.readdirSync(codingRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .sort((left, right) => left.name.localeCompare(right.name));
+
+    for (const entry of projectDirectories) {
+      suggestions.push(makeProjectSuggestion(path.join(codingRoot, entry.name), "project"));
+      if (suggestions.length >= limit) {
+        break;
+      }
+    }
+  }
+
+  return dedupeProjectSuggestions(suggestions, limit);
+}
+
+function dedupeProjectSuggestions(suggestions, limit) {
+  const deduped = [];
+  const seen = new Set();
+
+  for (const suggestion of suggestions) {
+    const suggestionPath = String(suggestion?.path || "");
+    if (!suggestionPath || seen.has(suggestionPath)) {
+      continue;
+    }
+    seen.add(suggestionPath);
+    deduped.push(suggestion);
+    if (deduped.length >= limit) {
+      break;
+    }
+  }
+
+  return deduped;
+}
+
+function shouldIncludeSuggestionEntry(name, prefix) {
+  if (!name) {
+    return false;
+  }
+
+  const trimmedPrefix = String(prefix || "").trim().toLowerCase();
+  const isHidden = name.startsWith(".");
+  if (isHidden && !trimmedPrefix.startsWith(".")) {
+    return false;
+  }
+  if (!trimmedPrefix) {
+    return true;
+  }
+
+  return name.toLowerCase().includes(trimmedPrefix);
+}
+
+function makeProjectSuggestion(targetPath, kind = "directory") {
+  const normalizedPath = path.normalize(targetPath);
+  const label = path.basename(normalizedPath) || normalizedPath;
+
+  return {
+    path: normalizedPath,
+    label,
+    kind,
+    detail: describeProjectSuggestion(kind, normalizedPath),
+  };
+}
+
+function describeProjectSuggestion(kind, targetPath) {
+  switch (kind) {
+    case "current":
+      return `Current repo · ${targetPath}`;
+    case "root":
+      return `Workspace root · ${targetPath}`;
+    case "project":
+      return `Project under ~/coding · ${targetPath}`;
+    case "selected":
+      return `Use this directory · ${targetPath}`;
+    default:
+      return `Directory on this server · ${targetPath}`;
+  }
+}
+
+function directoryExists(targetPath) {
+  const stats = safeStat(targetPath);
+  return Boolean(stats && stats.isDirectory());
+}
+
+function safeStat(targetPath) {
+  try {
+    return fs.statSync(targetPath);
+  } catch {
+    return null;
+  }
 }
 
 function pairPayloadForWeb(pairingPayload) {
@@ -1663,7 +2089,15 @@ function buildStructuredUserInputResponse(answersByQuestionId) {
   return { answers };
 }
 
-function mergeTransientThreadMessages(threadId, messages, { pendingServerRequest = null, transientPlanState = null } = {}) {
+function mergeTransientThreadMessages(
+  threadId,
+  messages,
+  {
+    pendingServerRequest = null,
+    transientPlanState = null,
+    transientLiveMessages = [],
+  } = {}
+) {
   const mergedMessages = Array.isArray(messages) ? messages.map((message) => ({ ...message })) : [];
 
   if (transientPlanState && transientPlanState.threadId === threadId) {
@@ -1693,12 +2127,65 @@ function mergeTransientThreadMessages(threadId, messages, { pendingServerRequest
     mergedMessages.push(buildStructuredUserInputPromptMessage(pendingServerRequest));
   }
 
+  for (const transientMessage of Array.isArray(transientLiveMessages) ? transientLiveMessages : []) {
+    const normalizedMessage = normalizeTransientLiveMessage(threadId, transientMessage);
+    if (!normalizedMessage) {
+      continue;
+    }
+
+    const existingIndex = mergedMessages.findIndex((message) => (
+      message.id === normalizedMessage.id
+      || (
+        normalizedMessage.turnId
+        && message.turnId === normalizedMessage.turnId
+        && message.kind === normalizedMessage.kind
+        && message.role === normalizedMessage.role
+        && message.text === normalizedMessage.text
+      )
+    ));
+    if (existingIndex >= 0) {
+      mergedMessages[existingIndex] = {
+        ...mergedMessages[existingIndex],
+        ...normalizedMessage,
+        createdAt: mergedMessages[existingIndex].createdAt || normalizedMessage.createdAt,
+      };
+    } else {
+      mergedMessages.push(normalizedMessage);
+    }
+  }
+
   return mergedMessages.sort((left, right) => {
     if (left.createdAt === right.createdAt) {
       return left.id.localeCompare(right.id);
     }
     return left.createdAt.localeCompare(right.createdAt);
   });
+}
+
+function normalizeTransientLiveMessage(threadId, message) {
+  if (!message || typeof message !== "object") {
+    return null;
+  }
+
+  const text = stringOrEmpty(message.text);
+  if (!text) {
+    return null;
+  }
+
+  const normalizedThreadId = stringOrEmpty(message.threadId) || threadId;
+  if (normalizedThreadId !== threadId) {
+    return null;
+  }
+
+  return {
+    id: stringOrEmpty(message.id) || `live-${message.kind || "message"}-${message.turnId || Date.now()}`,
+    threadId: normalizedThreadId,
+    turnId: stringOrEmpty(message.turnId),
+    kind: stringOrEmpty(message.kind) || "chat",
+    role: stringOrEmpty(message.role) || "system",
+    text,
+    createdAt: stringOrEmpty(message.createdAt) || new Date().toISOString(),
+  };
 }
 
 function buildTransientPlanMessage(transientPlanState) {
@@ -1843,6 +2330,32 @@ function approvalRequestKind(method) {
   }
 }
 
+function liveMessageId(kind, params = {}) {
+  const threadId = stringOrEmpty(params.threadId);
+  const turnId = stringOrEmpty(params.turnId || params.id);
+  const itemId = stringOrEmpty(params.itemId);
+  const callId = stringOrEmpty(params.call_id || params.callId);
+  return [
+    "live",
+    kind,
+    threadId || "thread",
+    turnId || "turn",
+    itemId || callId || "item",
+  ].join(":");
+}
+
+function formatLiveCommandText(command, status, output) {
+  const parts = [`$ ${command}`];
+  const normalizedStatus = stringOrEmpty(status);
+  if (normalizedStatus) {
+    parts.push(`[${normalizedStatus}]`);
+  }
+  if (stringOrEmpty(output)) {
+    parts.push(output);
+  }
+  return parts.join("\n");
+}
+
 function clonePlainObject(value) {
   return value && typeof value === "object"
     ? JSON.parse(JSON.stringify(value))
@@ -1863,6 +2376,7 @@ function openWebSocket(url, options) {
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(url, options);
     const cleanup = () => {
+      clearTimeout(timeout);
       socket.off("open", onOpen);
       socket.off("error", onError);
     };
@@ -1874,6 +2388,16 @@ function openWebSocket(url, options) {
       cleanup();
       reject(error);
     };
+    const timeout = setTimeout(() => {
+      cleanup();
+      try {
+        socket.terminate();
+      } catch {
+        // best effort
+      }
+      reject(new Error("Relay connection timed out"));
+    }, RELAY_CONNECT_TIMEOUT_MS);
+    timeout.unref?.();
     socket.once("open", onOpen);
     socket.once("error", onError);
   });
@@ -1933,6 +2457,20 @@ function decodeModelOption(modelObject) {
       || modelObject.default_reasoning_level
     ),
   };
+}
+
+function dedupeModels(models) {
+  const seen = new Set();
+  const deduped = [];
+  for (const model of models) {
+    const key = stringOrEmpty(model.id || model.model);
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(model);
+  }
+  return deduped;
 }
 
 function decodeReasoningEfforts(value) {
@@ -2252,6 +2790,10 @@ function normalizeThreadTitle(value) {
 
 function stringOrEmpty(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function stringPreserveWhitespace(value) {
+  return typeof value === "string" ? value : "";
 }
 
 function decodeTimestamp(rawValue) {

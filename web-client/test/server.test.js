@@ -1,5 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { EventEmitter } = require("node:events");
 
 const {
   RemodexWebClient,
@@ -22,13 +23,30 @@ function rpcError(message, code = -32602) {
 function createClientStub() {
   const client = Object.create(RemodexWebClient.prototype);
   client.pendingRequests = new Map();
+  client.pendingControlWaiters = new Set();
   client.pendingApproval = null;
   client.pendingServerRequest = null;
   client.lastPlanModeDowngrade = null;
   client.lastModelReroute = null;
+  client.lastDisconnect = null;
+  client.isConnected = false;
+  client.isInitialized = false;
   client.supportsTurnCollaborationMode = true;
   client.transientPlanStateByThread = new Map();
+  client.transientLiveMessagesByThread = new Map();
+  client.connectionOperation = Promise.resolve();
   return client;
+}
+
+function createSocketStub() {
+  const socket = new EventEmitter();
+  socket.off = socket.removeListener.bind(socket);
+  socket.readyState = 1;
+  socket.close = () => {
+    socket.readyState = 3;
+    socket.emit("close", 1000, Buffer.from("closed"));
+  };
+  return socket;
 }
 
 test.after(() => {
@@ -169,6 +187,95 @@ test("readThread falls back when includeTurns hits a transient empty rollout", a
   assert.equal(result.messages.length, 0);
 });
 
+test("listModels follows runtime pagination and dedupes models", async () => {
+  const client = createClientStub();
+  const requests = [];
+
+  client.sendRequest = async (method, params) => {
+    requests.push({ method, params });
+    if (!params.cursor) {
+      return {
+        result: {
+          data: [
+            { id: "gpt-5.4", displayName: "GPT-5.4" },
+            { id: "gpt-5.4", displayName: "GPT-5.4 duplicate" },
+          ],
+          nextCursor: "page-2",
+        },
+      };
+    }
+
+    return {
+      result: {
+        data: [
+          { id: "gpt-5.5", displayName: "GPT-5.5" },
+        ],
+      },
+    };
+  };
+
+  const models = await client.listModels({ pageSize: 2, maxPages: 5 });
+
+  assert.deepEqual(models.map((model) => model.id), ["gpt-5.4", "gpt-5.5"]);
+  assert.deepEqual(requests.map((request) => request.params.cursor), [null, "page-2"]);
+  assert.equal(requests[0].params.limit, 2);
+  assert.equal(client.cachedModels.length, 2);
+});
+
+test("listModels accepts snake_case next cursors from the runtime", async () => {
+  const client = createClientStub();
+  const requests = [];
+
+  client.sendRequest = async (method, params) => {
+    requests.push({ method, params });
+    if (!params.cursor) {
+      return {
+        result: {
+          models: [
+            { model: "gpt-5.4", display_name: "GPT-5.4" },
+          ],
+          next_cursor: "cursor-2",
+        },
+      };
+    }
+
+    return {
+      result: {
+        models: [
+          { model: "gpt-5.5", display_name: "GPT-5.5" },
+        ],
+      },
+    };
+  };
+
+  const models = await client.listModels({ pageSize: 1 });
+
+  assert.deepEqual(models.map((model) => model.model), ["gpt-5.4", "gpt-5.5"]);
+  assert.deepEqual(requests.map((request) => request.params.cursor), [null, "cursor-2"]);
+});
+
+test("listModels stops when the runtime repeats a cursor", async () => {
+  const client = createClientStub();
+  const requests = [];
+
+  client.sendRequest = async (method, params) => {
+    requests.push({ method, params });
+    return {
+      result: {
+        data: [
+          { id: params.cursor ? `model-${params.cursor}` : "model-first" },
+        ],
+        nextCursor: "same-cursor",
+      },
+    };
+  };
+
+  const models = await client.listModels({ pageSize: 1, maxPages: 10 });
+
+  assert.deepEqual(models.map((model) => model.id), ["model-first", "model-same-cursor"]);
+  assert.equal(requests.length, 2);
+});
+
 test("routeRpcMessage tracks typed requests, clears resolved requests, and stores notifications", () => {
   const client = createClientStub();
 
@@ -253,6 +360,92 @@ test("routeRpcMessage tracks typed requests, clears resolved requests, and store
   });
 
   assert.equal(client.pendingServerRequest, null);
+});
+
+test("stale socket close events do not clear a newer bridge connection", () => {
+  const client = createClientStub();
+  const oldSocket = createSocketStub();
+  const newSocket = createSocketStub();
+
+  client.socket = oldSocket;
+  client.attachSocketHandlers(oldSocket);
+  client.socket = newSocket;
+  client.attachSocketHandlers(newSocket);
+
+  oldSocket.emit("close", 1006, Buffer.from("stale"));
+
+  assert.equal(client.socket, newSocket);
+  assert.equal(client.isConnected, false);
+  assert.equal(client.lastDisconnect, null);
+
+  newSocket.emit("close", 1006, Buffer.from("live"));
+  assert.equal(client.socket, null);
+  assert.equal(client.lastDisconnect.reason, "live");
+});
+
+test("live notifications are merged into thread reads while rollout history catches up", () => {
+  const client = createClientStub();
+
+  client.routeRpcMessage({
+    method: "turn/started",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+    },
+  });
+  client.routeRpcMessage({
+    method: "item/reasoning/textDelta",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "thinking-1",
+      delta: "Inspecting",
+    },
+  });
+  client.routeRpcMessage({
+    method: "item/reasoning/textDelta",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "thinking-1",
+      delta: " files",
+    },
+  });
+  client.routeRpcMessage({
+    method: "codex/event/exec_command_begin",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      call_id: "cmd-1",
+      command: "npm test",
+    },
+  });
+  client.routeRpcMessage({
+    method: "codex/event/exec_command_output_delta",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      call_id: "cmd-1",
+      command: "npm test",
+      chunk: "pass\n",
+    },
+  });
+  client.routeRpcMessage({
+    method: "codex/event/agent_message",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      message: "Done",
+    },
+  });
+
+  const mergedMessages = mergeTransientThreadMessages("thread-1", [], {
+    transientLiveMessages: client.transientLiveMessagesByThread.get("thread-1"),
+  });
+
+  assert.equal(mergedMessages.some((message) => message.text === "Inspecting files"), true);
+  assert.equal(mergedMessages.some((message) => message.kind === "command" && message.text.includes("pass")), true);
+  assert.equal(mergedMessages.some((message) => message.role === "assistant" && message.text === "Done"), true);
 });
 
 test("buildServerRequestResponsePayload encodes typed response shapes", () => {
