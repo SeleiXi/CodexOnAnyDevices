@@ -222,6 +222,60 @@ test("listModels follows runtime pagination and dedupes models", async () => {
   assert.equal(client.cachedModels.length, 2);
 });
 
+test("listModels accepts snake_case next cursors from the runtime", async () => {
+  const client = createClientStub();
+  const requests = [];
+
+  client.sendRequest = async (method, params) => {
+    requests.push({ method, params });
+    if (!params.cursor) {
+      return {
+        result: {
+          models: [
+            { model: "gpt-5.4", display_name: "GPT-5.4" },
+          ],
+          next_cursor: "cursor-2",
+        },
+      };
+    }
+
+    return {
+      result: {
+        models: [
+          { model: "gpt-5.5", display_name: "GPT-5.5" },
+        ],
+      },
+    };
+  };
+
+  const models = await client.listModels({ pageSize: 1 });
+
+  assert.deepEqual(models.map((model) => model.model), ["gpt-5.4", "gpt-5.5"]);
+  assert.deepEqual(requests.map((request) => request.params.cursor), [null, "cursor-2"]);
+});
+
+test("listModels stops when the runtime repeats a cursor", async () => {
+  const client = createClientStub();
+  const requests = [];
+
+  client.sendRequest = async (method, params) => {
+    requests.push({ method, params });
+    return {
+      result: {
+        data: [
+          { id: params.cursor ? `model-${params.cursor}` : "model-first" },
+        ],
+        nextCursor: "same-cursor",
+      },
+    };
+  };
+
+  const models = await client.listModels({ pageSize: 1, maxPages: 10 });
+
+  assert.deepEqual(models.map((model) => model.id), ["model-first", "model-same-cursor"]);
+  assert.equal(requests.length, 2);
+});
+
 test("routeRpcMessage tracks typed requests, clears resolved requests, and stores notifications", () => {
   const client = createClientStub();
 
