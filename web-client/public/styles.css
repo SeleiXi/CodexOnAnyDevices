@@ -486,6 +486,7 @@ button:disabled {
   background: var(--panel-elevated);
   border: 1px solid rgba(15, 23, 32, 0.06);
   box-shadow: var(--shadow);
+  overflow: hidden;
   transform: translateX(calc(-100% - 18px));
   transition: transform 180ms ease;
 }
@@ -508,6 +509,7 @@ button:disabled {
 .sidebar-tools {
   display: grid;
   gap: 10px;
+  min-width: 0;
 }
 
 .sidebar-action-grid {
@@ -616,6 +618,12 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  min-width: 0;
+}
+
+.project-suggestion-top strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .project-suggestion-kind,
@@ -657,13 +665,16 @@ button:disabled {
 
 .thread-list {
   overflow: auto;
+  overflow-x: hidden;
   min-height: 0;
+  min-width: 0;
   padding-right: 4px;
 }
 
 .thread-group {
   display: grid;
   gap: 4px;
+  min-width: 0;
   margin-bottom: 14px;
 }
 
@@ -688,6 +699,13 @@ button:disabled {
   min-width: 0;
 }
 
+.thread-group-heading-label span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .thread-group-action {
   flex: 0 0 auto;
   min-height: 28px;
@@ -705,6 +723,7 @@ button:disabled {
   align-items: center;
   gap: 8px;
   width: 100%;
+  min-width: 0;
   border-radius: var(--radius-sm);
 }
 
@@ -732,6 +751,7 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 
 .thread-title-text {
@@ -742,11 +762,16 @@ button:disabled {
   line-height: 1.3;
   display: -webkit-box;
   overflow: hidden;
+  overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
 
 .thread-time {
+  flex: 0 0 auto;
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 0.74rem;
   white-space: nowrap;
 }
@@ -755,6 +780,7 @@ button:disabled {
   font-size: 0.74rem;
   line-height: 1.45;
   word-break: break-word;
+  overflow-wrap: anywhere;
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
@@ -765,6 +791,7 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 
 .thread-row-footer .thread-subcopy {
@@ -808,6 +835,7 @@ button:disabled {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+  min-width: 0;
 }
 
 .paired-mac,
@@ -816,6 +844,15 @@ button:disabled {
   padding: 12px;
   border-radius: var(--radius-md);
   background: rgba(15, 23, 32, 0.05);
+}
+
+.paired-mac strong,
+.session-summary strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
 }
 
 .paired-mac strong,
