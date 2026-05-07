@@ -402,17 +402,44 @@ class RemodexWebClient {
       .filter(Boolean);
   }
 
-  async listModels(limit = 50) {
-    const response = await this.sendRequest("model/list", {
-      cursor: null,
-      limit,
-      includeHidden: false,
-    });
-    const result = response.result || {};
-    const items = result.data || result.items || result.models || [];
-    const models = items.map(decodeModelOption).filter(Boolean);
-    this.cachedModels = models;
-    return models;
+  async listModels(options = {}) {
+    const pageSize = typeof options === "number"
+      ? options
+      : Number(options.pageSize || 100);
+    const limit = Number.isFinite(pageSize) && pageSize > 0 ? Math.floor(pageSize) : 100;
+    const includeHidden = typeof options === "object" && Boolean(options.includeHidden);
+    const maxPages = typeof options === "object" && Number.isFinite(Number(options.maxPages))
+      ? Math.max(1, Math.floor(Number(options.maxPages)))
+      : 20;
+    const models = [];
+    let cursor = null;
+    const seenCursors = new Set();
+
+    for (let page = 0; page < maxPages; page += 1) {
+      const response = await this.sendRequest("model/list", {
+        cursor,
+        limit,
+        includeHidden,
+      });
+      const result = response.result || {};
+      const items = result.data || result.items || result.models || [];
+      models.push(...items.map(decodeModelOption).filter(Boolean));
+
+      const nextCursor = stringOrEmpty(
+        result.nextCursor
+        || result.next_cursor
+        || result.next
+        || result.cursor
+      );
+      if (!nextCursor || seenCursors.has(nextCursor)) {
+        break;
+      }
+      seenCursors.add(nextCursor);
+      cursor = nextCursor;
+    }
+
+    this.cachedModels = dedupeModels(models);
+    return this.cachedModels;
   }
 
   async createThread({ cwd = "", accessMode = "full-access", model = "" } = {}) {
@@ -2430,6 +2457,20 @@ function decodeModelOption(modelObject) {
       || modelObject.default_reasoning_level
     ),
   };
+}
+
+function dedupeModels(models) {
+  const seen = new Set();
+  const deduped = [];
+  for (const model of models) {
+    const key = stringOrEmpty(model.id || model.model);
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(model);
+  }
+  return deduped;
 }
 
 function decodeReasoningEfforts(value) {

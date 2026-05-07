@@ -187,6 +187,41 @@ test("readThread falls back when includeTurns hits a transient empty rollout", a
   assert.equal(result.messages.length, 0);
 });
 
+test("listModels follows runtime pagination and dedupes models", async () => {
+  const client = createClientStub();
+  const requests = [];
+
+  client.sendRequest = async (method, params) => {
+    requests.push({ method, params });
+    if (!params.cursor) {
+      return {
+        result: {
+          data: [
+            { id: "gpt-5.4", displayName: "GPT-5.4" },
+            { id: "gpt-5.4", displayName: "GPT-5.4 duplicate" },
+          ],
+          nextCursor: "page-2",
+        },
+      };
+    }
+
+    return {
+      result: {
+        data: [
+          { id: "gpt-5.5", displayName: "GPT-5.5" },
+        ],
+      },
+    };
+  };
+
+  const models = await client.listModels({ pageSize: 2, maxPages: 5 });
+
+  assert.deepEqual(models.map((model) => model.id), ["gpt-5.4", "gpt-5.5"]);
+  assert.deepEqual(requests.map((request) => request.params.cursor), [null, "page-2"]);
+  assert.equal(requests[0].params.limit, 2);
+  assert.equal(client.cachedModels.length, 2);
+});
+
 test("routeRpcMessage tracks typed requests, clears resolved requests, and stores notifications", () => {
   const client = createClientStub();
 
