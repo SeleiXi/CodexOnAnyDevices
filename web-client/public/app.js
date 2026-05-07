@@ -171,7 +171,7 @@ function bindEvents() {
     button.addEventListener("click", handleAccessModeOptionSelect);
   });
   elements.loadDefaultPairing.addEventListener("click", loadDefaultPairing);
-  elements.connectButton.addEventListener("click", connectBridge);
+  elements.connectButton.addEventListener("click", handleConnectionConnectAction);
   elements.disconnectButton.addEventListener("click", disconnectBridge);
   elements.accessMode.addEventListener("change", renderComposerMeta);
   elements.projectPath.addEventListener("input", () => {
@@ -814,7 +814,7 @@ function renderConnectionState() {
     ? `Secure session ${state.status?.secureSessionId || "unknown"}`
     : state.status?.lastDisconnect?.reason
       ? `Last disconnect: ${state.status.lastDisconnect.reason}`
-      : "Load a pairing payload to connect.";
+      : "Connect with automatic local pairing. Manual JSON is only needed for custom hosts.";
 
   elements.pairedMacLabel.textContent = isConnected ? "Connected to Computer" : state.status?.macDeviceId ? "Saved Mac" : "No Pairing";
   elements.pairedMacName.textContent = state.status?.macDeviceId
@@ -1027,7 +1027,7 @@ function renderHomeState() {
 
   elements.homePrimaryButton.disabled = state.isConnecting || state.isDisconnecting;
   elements.homePrimaryButton.textContent = homePrimaryLabel(phase);
-  elements.homeSecondaryButton.textContent = isConnected ? "Open Connection Settings" : "Load Local JSON";
+  elements.homeSecondaryButton.textContent = "Connection Settings";
 }
 
 function renderBanner() {
@@ -1563,19 +1563,29 @@ function handleHomePrimaryAction() {
     void disconnectBridge();
     return;
   }
-  if (!elements.pairingJson.value.trim()) {
-    setCurrentView("connection");
-    return;
-  }
-  void connectBridge();
+  void connectDefaultPairing();
 }
 
 function handleHomeSecondaryAction() {
-  if (isBridgeConnected()) {
+  setCurrentView("connection");
+}
+
+function handleConnectionConnectAction() {
+  if (elements.pairingJson.value.trim()) {
+    void connectBridge();
+    return;
+  }
+  void connectDefaultPairing();
+}
+
+async function connectDefaultPairing() {
+  clearAppError();
+  const pairingPayload = await loadDefaultPairing({ retryOnFailure: true });
+  if (!pairingPayload) {
     setCurrentView("connection");
     return;
   }
-  void loadDefaultPairing();
+  await connectBridge({ pairingPayload });
 }
 
 async function handleBannerAction() {
@@ -2058,7 +2068,7 @@ function homePrimaryLabel(phase) {
     case "connected":
       return "Disconnect";
     default:
-      return elements.pairingJson.value.trim() ? "Connect to Bridge" : "Open Pairing";
+      return "Connect Local Bridge";
   }
 }
 

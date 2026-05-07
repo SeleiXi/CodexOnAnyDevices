@@ -1491,6 +1491,22 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+.manual-pairing-panel {
+  gap: 0;
+}
+
+.manual-pairing-panel summary {
+  cursor: pointer;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.manual-pairing-content {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
 .settings-actions.two-up > * {
   flex: 1 1 180px;
 }

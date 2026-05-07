@@ -378,7 +378,7 @@
               <span class="micro-label muted">State</span>
               <strong id="connection-status">Disconnected</strong>
               <p id="connection-detail" class="support-copy">
-                Load a pairing payload to connect.
+                Connect with automatic local pairing. Manual JSON is only needed for custom hosts.
               </p>
             </div>
 
@@ -388,10 +388,10 @@
                 class="ghost-button"
                 type="button"
               >
-                Load Local JSON
+                Refresh Pairing
               </button>
               <button id="connect-button" class="primary-button" type="button">
-                Connect
+                Connect Local Bridge
               </button>
               <button id="disconnect-button" class="ghost-button" type="button">
                 Disconnect
@@ -399,17 +399,22 @@
             </div>
           </div>
 
-          <div class="settings-block">
-            <label class="field">
-              <span>Pairing JSON</span>
-              <textarea
-                id="pairing-json"
-                spellcheck="false"
-                rows="8"
-                placeholder='{"relay":"ws://...","sessionId":"..."}'
-              ></textarea>
-            </label>
+          <details class="settings-block manual-pairing-panel">
+            <summary>Manual Pairing JSON</summary>
+            <div class="manual-pairing-content">
+              <label class="field">
+                <span>Pairing JSON</span>
+                <textarea
+                  id="pairing-json"
+                  spellcheck="false"
+                  rows="8"
+                  placeholder='{"relay":"ws://...","sessionId":"..."}'
+                ></textarea>
+              </label>
+            </div>
+          </details>
 
+          <div class="settings-block">
             <div class="settings-grid">
               <label class="field">
                 <span>Access Mode</span>
