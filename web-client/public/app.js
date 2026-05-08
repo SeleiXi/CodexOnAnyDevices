@@ -1749,7 +1749,7 @@ function describeBan(ban) {
 
 function selectedModelRequestValue() {
   const selectedModelId = String(state.selectedModelId || "").trim();
-  return selectedModelId || undefined;
+  return selectedModelId || defaultModelRequestValue() || undefined;
 }
 
 function selectedReasoningEffortRequestValue() {
@@ -1775,6 +1775,11 @@ function defaultModelDisplayName() {
     return "Auto";
   }
   return `Auto (${defaultModel.displayName})`;
+}
+
+function defaultModelRequestValue() {
+  const defaultModel = defaultModelOption();
+  return String(defaultModel?.model || defaultModel?.id || "").trim();
 }
 
 function activeModelDisplayName() {
