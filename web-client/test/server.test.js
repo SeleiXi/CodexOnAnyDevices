@@ -142,6 +142,34 @@ test("startTurn retries once without collaboration mode when the runtime rejects
   assert.match(client.lastPlanModeDowngrade.reason, /Plan mode is not supported/);
 });
 
+test("startTurn preserves prompt whitespace while rejecting blank messages", async () => {
+  const client = createClientStub();
+  const requests = [];
+
+  client.resumeThread = async () => null;
+  client.sendRequestWithSandboxFallback = async (method, params) => {
+    requests.push({ method, params });
+    return {
+      result: {
+        ok: true,
+      },
+    };
+  };
+
+  await assert.rejects(
+    () => client.startTurn("thread-1", " \n\t "),
+    /Message cannot be empty/
+  );
+
+  await client.startTurn("thread-1", "\n  keep exact spacing  \n", {
+    model: "gpt-5.4",
+    effort: "high",
+  });
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].params.input[0].text, "\n  keep exact spacing  \n");
+});
+
 test("readThread falls back when includeTurns hits a transient empty rollout", async () => {
   const client = createClientStub();
   const requests = [];

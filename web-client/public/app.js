@@ -687,8 +687,8 @@ async function refreshActiveThread() {
 
 async function sendMessage(event) {
   event.preventDefault();
-  const text = elements.composerInput.value.trim();
-  if (!text) {
+  const text = elements.composerInput.value;
+  if (!text.trim()) {
     return;
   }
   if (!isBridgeConnected()) {

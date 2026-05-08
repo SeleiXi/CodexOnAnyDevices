@@ -489,8 +489,8 @@ class RemodexWebClient {
       collaborationMode = null,
     } = {}
   ) {
-    const trimmed = String(text || "").trim();
-    if (!trimmed) {
+    const rawText = String(text || "");
+    if (!rawText.trim()) {
       throw new Error("Message cannot be empty");
     }
 
@@ -506,7 +506,7 @@ class RemodexWebClient {
     while (true) {
       const params = buildTurnStartParams({
         threadId,
-        text: trimmed,
+        text: rawText,
         model,
         effort,
         collaborationMode: includeCollaborationMode ? collaborationMode : null,
