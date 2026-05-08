@@ -132,6 +132,7 @@ textarea {
   border: 1px solid rgba(15, 23, 32, 0.10);
   background: rgba(255, 255, 255, 0.84);
   color: var(--text);
+  font-size: 16px;
   padding: 14px 16px;
 }
 
@@ -1707,7 +1708,7 @@ button:disabled {
     min-height: 42px;
     max-height: 42px;
     padding: 8px 4px 6px;
-    font-size: 0.92rem;
+    font-size: 16px;
   }
 
   .composer-inline-row .primary-button {
@@ -1855,7 +1856,7 @@ button:disabled {
     min-height: 46px;
     max-height: 46px;
     padding: 10px 6px 8px;
-    font-size: 0.95rem;
+    font-size: 16px;
   }
 
   .composer-secondary {
