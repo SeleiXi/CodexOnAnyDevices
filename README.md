@@ -1,8 +1,8 @@
-# RemodexOnAnyDevices
+# CodexOnAnyDevices
 
 [English](README.md) | [中文](README-zh.md)
 
-RemodexOnAnyDevices enables you to keep vibe coding from your phone at the gym or to use Codex-app on your remote server (which is not directly supported by the official Codex app). It keeps the Codex runtime on your own machine and expands the client surface so the project can be used across any platforms and browser-based workflows without reintroducing hosted-service assumptions.
+CodexOnAnyDevices enables you to keep vibe coding from your phone at the gym or to use Codex-app on your remote server (which is not directly supported by the official Codex app). It keeps the Codex runtime on your own machine and expands the client surface so the project can be used across any platforms and browser-based workflows without reintroducing hosted-service assumptions.
 
 ## Demo
 
@@ -12,7 +12,7 @@ RemodexOnAnyDevices enables you to keep vibe coding from your phone at the gym o
   <img src="assets/demo(3).jpg" alt="demo3" width="60%" style="margin: 10px;">
 </div>
 
-## Differences between remodex
+## Differences between codex
 
 - login via password (no need to QR pairing)
 - trusted reconnects, and local bridge sessions
@@ -54,7 +54,7 @@ The web UI uses a local admin password.
 - Recommended: `npm run set-password -- --generate --write-plaintext`
 - This generates a strong password, stores the hash in `web-client/state/auth-state.json`, and writes the plaintext password to `web-client/state/admin-password.txt`
 - You can also set your own password with `npm run set-password -- --password "<strong password>"`
-- The script also accepts `REMODEX_WEB_ADMIN_PASSWORD` if you prefer supplying it through an environment variable
+- The script also accepts `CODEX_WEB_ADMIN_PASSWORD` if you prefer supplying it through an environment variable
 
 ## Deployment Options
 
@@ -65,7 +65,7 @@ You do not have to expose everything directly to the public internet. The practi
 Use the built-in local relay helper and advertise a hostname or IP that your phone can actually reach on the same network:
 
 ```sh
-./run-local-remodex.sh --hostname <reachable-lan-ip-or-hostname> --port 9000
+./run-local-codex.sh --hostname <reachable-lan-ip-or-hostname> --port 9000
 ```
 
 Then start the web client locally and use the generated password to sign in.
@@ -78,7 +78,7 @@ Yes, this is supported by the current architecture.
 
 - Run `relay/` on a host that has a public IP or public domain
 - Start `phodex-bridge/` on your Windows, macOS, or Linux machine where Codex actually runs
-- Point the bridge at that relay with `REMODEX_RELAY`
+- Point the bridge at that relay with `CODEX_RELAY`
 - Run `web-client/` wherever you want the browser UI to live, usually on the same machine as the bridge
 
 Example bridge startup:
@@ -86,7 +86,7 @@ Example bridge startup:
 ```sh
 cd phodex-bridge
 npm install
-REMODEX_RELAY=wss://your-linux-host.example.com/relay npm start
+CODEX_RELAY=wss://your-linux-host.example.com/relay npm start
 ```
 
 Example relay startup on Linux:
@@ -113,14 +113,14 @@ Typical setup:
 Example:
 
 ```sh
-./run-local-remodex.sh --hostname <your-machine-tailnet-name-or-tailscale-ip> --port 9000
+./run-local-codex.sh --hostname <your-machine-tailnet-name-or-tailscale-ip> --port 9000
 ```
 
 Or, if the relay is separate:
 
 ```sh
 cd phodex-bridge
-REMODEX_RELAY=ws://<relay-tailnet-name-or-tailscale-ip>:9000/relay npm start
+CODEX_RELAY=ws://<relay-tailnet-name-or-tailscale-ip>:9000/relay npm start
 ```
 
 If you also want the web UI to be reachable only inside your tailnet, start the web client normally and expose `8787` through Tailscale Serve on that machine. Recent Tailscale versions use:
