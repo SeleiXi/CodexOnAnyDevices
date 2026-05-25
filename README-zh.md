@@ -1,8 +1,10 @@
-# RemodexOnAnyDevices
+# CodexOnAnyDevices
 
 [English](README.md) | [中文](README-zh.md)
 
-RemodexOnAnyDevice 让你可以一边在外健身一边vibe coding，或者在你的windows上也可以用codex-app来操作你远程linux服务器的项目（官方 Codex app 目前并不直接支持让你在你的windows机器上用codex跑你一个在服务器上的project）。
+CodexOnAnyDevices 让你可以一边在外健身一边vibe coding，或者在你的windows上也可以用codex-app来操作你远程linux服务器的项目（官方 Codex app 目前并不直接支持让你在你的windows机器上用codex跑你一个在服务器上的project）。
+- 此项目发布早于codex官方手机app codex，并且目前官方不支持在windows上远程（需要自己调设定，且不稳定）以及在电脑上操作你在linux/其他电脑上的codex
+- 此外，官方版本目前仍然有不稳定的地方，本项目全部开源，因此你可以随便魔改/新加feat
 
 此外，原版只支持iPhone使用，RemodexOnAnyDevices让你可以在任何手机使用，且原版对Windows/Linux部署的兼容性较差，RemodexOnAnyDevices在这方面专门做了一些优化。
 
