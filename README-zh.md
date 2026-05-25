@@ -6,10 +6,6 @@ CodexOnAnyDevices 让你可以一边在外健身一边vibe coding，或者在你
 - 此项目发布早于codex官方手机app codex，并且目前官方不支持在windows上远程（需要自己调设定，且不稳定）以及在电脑上操作你在linux/其他电脑上的codex
 - 此外，官方版本目前仍然有不稳定的地方，本项目全部开源，因此你可以随便魔改/新加feat
 
-此外，原版只支持iPhone使用，RemodexOnAnyDevices让你可以在任何手机使用，且原版对Windows/Linux部署的兼容性较差，RemodexOnAnyDevices在这方面专门做了一些优化。
-
-上游项目的 ISC License 保留在 [LICENSE](LICENSE) 中。
-
 ## Demo
 
 <div align="center">
@@ -18,17 +14,18 @@ CodexOnAnyDevices 让你可以一边在外健身一边vibe coding，或者在你
   <img src="assets/demo(3).jpg" alt="demo3" width="60%" style="margin: 10px;">
 </div>
 
-## 与 remodex 的区别
-
-- 自动pairing，使用密码登录（不需要通过二维码配对）
-- 本地 bridge 会话
-- 更好地支持 Windows 和 Linux 部署（比如一些重连机制）
 
 ## 详细说明
 
 - `phodex-bridge/`：与 Codex 通信的本地 Node.js bridge
 - `web-client/`：用于配对、线程浏览和聊天的本地 Web UI
 - `relay/`：供本地 / 自托管部署使用的 relay 服务
+
+项目特色
+- 自动pairing，使用密码登录（不需要通过二维码配对）
+- 本地 bridge 会话
+- 更好地支持 Windows 和 Linux 部署（比如一些重连机制）
+
 
 ## 快速开始
 
