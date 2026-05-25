@@ -12,12 +12,6 @@ CodexOnAnyDevices enables you to keep vibe coding from your phone at the gym or 
   <img src="assets/demo(3).jpg" alt="demo3" width="60%" style="margin: 10px;">
 </div>
 
-## Differences between remodex
-
-- login via password (no need to QR pairing)
-- trusted reconnects, and local bridge sessions
-- better support windows and linux deployment
-
 ## Details
 
 This repository currently contains:
@@ -26,6 +20,12 @@ This repository currently contains:
 - `web-client/`: a local web UI for pairing, thread browsing, and chat
 - `relay/`: the relay service used by local/self-hosted setups
 
+
+- login via password (no need to QR pairing)
+- trusted reconnects, and local bridge sessions
+- better support windows and linux deployment
+
+  
 ## Quick Start
 
 ### Bridge
