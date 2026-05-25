@@ -90,6 +90,7 @@ const elements = {
   messageList: document.querySelector("#message-list"),
   composerForm: document.querySelector("#composer-form"),
   composerInput: document.querySelector("#composer-input"),
+  steeringInput: document.querySelector("#steering-input"),
   modelButton: document.querySelector("#model-button"),
   modelMenu: document.querySelector("#model-menu"),
   modelSummary: document.querySelector("#model-summary"),
@@ -164,6 +165,7 @@ function bindEvents() {
   elements.homeSecondaryButton.addEventListener("click", handleHomeSecondaryAction);
   elements.statusBannerAction.addEventListener("click", handleBannerAction);
   elements.composerForm.addEventListener("submit", sendMessage);
+  elements.steeringInput?.addEventListener("input", renderComposerMeta);
   elements.modelButton.addEventListener("click", toggleModelMenu);
   elements.reasoningButton.addEventListener("click", toggleReasoningMenu);
   elements.planButton.addEventListener("click", togglePlanModeArmed);
@@ -730,6 +732,9 @@ async function sendMessage(event) {
     });
     elements.composerInput.value = "";
     if (shouldUsePlanMode) {
+      if (elements.steeringInput) {
+        elements.steeringInput.value = "";
+      }
       state.planModeArmed = false;
     }
     state.forceScrollToBottom = true;
@@ -1186,7 +1191,13 @@ function renderComposerMeta() {
     "aria-label",
     state.planModeArmed ? "Plan mode armed for the next turn" : "Plan mode is off"
   );
-  elements.planSummary.textContent = state.planModeArmed ? "Plan Next" : "Plan";
+  elements.planSummary.textContent = state.planModeArmed
+    ? (readSteeringInstructions() ? "Plan + Steering" : "Plan Next")
+    : "Plan";
+  if (elements.steeringInput) {
+    elements.steeringInput.hidden = !state.planModeArmed;
+    elements.steeringInput.disabled = !state.planModeArmed;
+  }
 }
 
 function setProjectPath(value) {
@@ -1894,9 +1905,13 @@ function buildPlanCollaborationModePayload() {
     settings: {
       model,
       reasoning_effort: selectedReasoningEffortRequestValue() || null,
-      developer_instructions: null,
+      developer_instructions: readSteeringInstructions() || null,
     },
   };
+}
+
+function readSteeringInstructions() {
+  return String(elements.steeringInput?.value || "").trim();
 }
 
 function togglePlanModeArmed() {
