@@ -853,6 +853,10 @@ button:disabled {
   font-size: 0.82rem;
 }
 
+.thread-empty.is-loading {
+  color: var(--muted-strong);
+}
+
 .sidebar-footer {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -18,6 +18,7 @@ const state = {
   planModeArmed: false,
   pinnedThreadIds: [],
   threads: [],
+  isLoadingThreads: false,
   searchQuery: "",
   activeThreadId: "",
   activeThread: null,
@@ -608,11 +609,14 @@ async function disconnectBridge() {
 
 async function refreshThreads() {
   if (!state.authenticated || !isBridgeConnected()) {
+    state.isLoadingThreads = false;
     renderThreads();
     renderMessages();
     return;
   }
 
+  state.isLoadingThreads = true;
+  renderThreads();
   try {
     const response = await api("/api/threads");
     state.threads = mergePendingActiveThread(response.threads || []);
@@ -632,6 +636,9 @@ async function refreshThreads() {
     }
   } catch (error) {
     showAppError(error.message);
+  } finally {
+    state.isLoadingThreads = false;
+    renderThreads();
   }
 }
 
@@ -862,10 +869,8 @@ function renderThreads() {
 
   if (filteredThreads.length === 0) {
     const empty = document.createElement("div");
-    empty.className = "thread-empty";
-    empty.textContent = isBridgeConnected()
-      ? "No matching conversations."
-      : "Connect the bridge to load chats.";
+    empty.className = `thread-empty ${state.isLoadingThreads ? "is-loading" : ""}`;
+    empty.textContent = threadEmptyMessage();
     elements.threadList.appendChild(empty);
     return;
   }
@@ -939,6 +944,16 @@ function renderThreads() {
 
     elements.threadList.appendChild(section);
   }
+}
+
+function threadEmptyMessage() {
+  if (!isBridgeConnected()) {
+    return "Connect the bridge to load chats.";
+  }
+  if (state.isLoadingThreads) {
+    return "Loading conversations...";
+  }
+  return state.searchQuery ? "No matching conversations." : "No conversations yet.";
 }
 
 function renderMessages() {
