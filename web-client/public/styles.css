@@ -1351,6 +1351,18 @@ button:disabled {
   overflow-y: auto;
 }
 
+.composer-card .steering-input {
+  width: 100%;
+  min-height: 54px;
+  max-height: 96px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(24, 119, 242, 0.14);
+  border-radius: 16px;
+  background: rgba(24, 119, 242, 0.06);
+  font-size: 0.9rem;
+}
+
 .composer-secondary {
   gap: 6px;
   flex-wrap: nowrap;
