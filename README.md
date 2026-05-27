@@ -53,6 +53,7 @@ cd phodex-bridge
 npm install
 npm start
 ```
+- You could also deploy via [https://www.npmjs.com/package/codex-on-any-devices](https://www.npmjs.com/package/codex-on-any-devices)
 
 ### Web Client
 
@@ -62,6 +63,7 @@ npm install
 npm run set-password -- --generate --write-plaintext
 npm start
 ```
+- You could also deploy via [https://github.com/SeleiXi/CodexOnAnyDevices/pkgs/container/codex-on-any-devices-web-client](https://github.com/SeleiXi/CodexOnAnyDevices/pkgs/container/codex-on-any-devices-web-client)
 
 Then open `http://127.0.0.1:8787`.
 
@@ -114,6 +116,7 @@ cd relay
 npm install
 npm start
 ```
+- You could also deploy via [https://github.com/SeleiXi/CodexOnAnyDevices/pkgs/container/codex-on-any-devices-relay](https://github.com/SeleiXi/CodexOnAnyDevices/pkgs/container/codex-on-any-devices-relay)
 
 In this mode, Codex and your repository stay on your own machine. The Linux box is only the relay transport hop.
 
