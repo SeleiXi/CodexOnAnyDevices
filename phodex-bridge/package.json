@@ -1,10 +1,11 @@
 {
-  "name": "remodex",
+  "name": "codex-on-any-devices",
   "version": "1.3.7",
-  "description": "Local bridge between Codex and the Remodex mobile app. Run `remodex up` to start.",
+  "description": "Local bridge for controlling a Codex runtime from phones, browsers, and other devices.",
   "main": "src/index.js",
   "bin": {
-    "remodex": "./bin/remodex.js"
+    "codex-on-any-devices": "bin/remodex.js",
+    "codexonanydevices": "bin/remodex.js"
   },
   "files": [
     "bin/",
@@ -17,10 +18,11 @@
     "postpack": "node ./scripts/cleanup-private-defaults.js"
   },
   "keywords": [
-    "remodex",
     "codex",
+    "codex-on-any-devices",
     "bridge",
-    "cli"
+    "remote-control",
+    "websocket"
   ],
   "author": "Emanuele Di Pietro",
   "license": "ISC",
@@ -28,5 +30,14 @@
   "dependencies": {
     "qrcode-terminal": "^0.12.0",
     "ws": "^8.19.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SeleiXi/RemodexOnAnyDevices.git",
+    "directory": "phodex-bridge"
+  },
+  "homepage": "https://github.com/SeleiXi/RemodexOnAnyDevices#readme",
+  "bugs": {
+    "url": "https://github.com/SeleiXi/RemodexOnAnyDevices/issues"
   }
 }

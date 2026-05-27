@@ -1,6 +1,16 @@
+<div align="center">
+
 # CodexOnAnyDevices
 
+**Codex, on any device.**
+
 [English](README.md) | [中文](README-zh.md)
+
+[![npm](https://img.shields.io/npm/v/codex-on-any-devices)](https://www.npmjs.com/package/codex-on-any-devices)
+[![Docker](https://img.shields.io/badge/docker-ghcr.io-blue)](https://github.com/SeleiXi/RemodexOnAnyDevices/pkgs/container/codex-on-any-devices-relay)
+[![License](https://img.shields.io/github/license/SeleiXi/RemodexOnAnyDevices)](LICENSE)
+
+</div>
 
 CodexOnAnyDevices enables you to keep vibe coding from your phone while working out at the gym, or to use the Codex app on Windows to manage projects hosted on a remote Linux server (a workflow not directly supported by the official Codex app).
 - Early Release & Better Remote Support: This project was released before the official Codex mobile app. Currently, the official version does not support remote control from a Windows machine out of the box (requiring tedious manual configuration, resulting in unstable connections, slow speeds, and missing features).

@@ -1,6 +1,16 @@
+<div align="center">
+
 # CodexOnAnyDevices
 
+**Codex, on any device.**
+
 [English](README.md) | [中文](README-zh.md)
+
+[![npm](https://img.shields.io/npm/v/codex-on-any-devices)](https://www.npmjs.com/package/codex-on-any-devices)
+[![Docker](https://img.shields.io/badge/docker-ghcr.io-blue)](https://github.com/SeleiXi/RemodexOnAnyDevices/pkgs/container/codex-on-any-devices-relay)
+[![License](https://img.shields.io/github/license/SeleiXi/RemodexOnAnyDevices)](LICENSE)
+
+</div>
 
 CodexOnAnyDevices 让你可以一边在外健身一边vibe coding，或者在你的windows上也可以用codex-app来操作你远程linux服务器的项目（官方 Codex app 目前并不直接支持让你在你的windows机器上用codex跑你一个在服务器上的project）。
 - 此项目发布早于codex官方手机app codex，并且目前官方不支持在远程操控windows的codex（需要自己调设定+使用不稳定/连接速度慢+欠缺某些feature）
