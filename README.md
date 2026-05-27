@@ -2,7 +2,14 @@
 
 [English](README.md) | [中文](README-zh.md)
 
-CodexOnAnyDevices enables you to keep vibe coding from your phone at the gym or to use Codex-app on your remote server (which is not directly supported by the official Codex app). It keeps the Codex runtime on your own machine and expands the client surface so the project can be used across any platforms and browser-based workflows without reintroducing hosted-service assumptions.
+CodexOnAnyDevices enables you to keep vibe coding from your phone while working out at the gym, or to use the Codex app on Windows to manage projects hosted on a remote Linux server (a workflow not directly supported by the official Codex app).
+- Early Release & Better Remote Support: This project was released before the official Codex mobile app. Currently, the official version does not support remote control from a Windows machine out of the box (requiring tedious manual configuration, resulting in unstable connections, slow speeds, and missing features).
+
+- Cross-Machine Limitations: The official version does not allow you to control a Codex instance running on a remote Linux server or another computer from your laptop.
+
+- Account Flexibility: The official ecosystem strictly binds Codex Mobile and the desktop client to the same account. In contrast, CodexOnAnyDevices binds directly to your local Codex runtime, allowing you to use any account seamlessly.
+
+- Open Source & Customizable: While the official version still experiences stability issues, this project is completely open source, giving you full freedom to customize, mod, or add any features you need.
 
 ## Demo
 
