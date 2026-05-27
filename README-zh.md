@@ -7,7 +7,8 @@
 [English](README.md) | [中文](README-zh.md)
 
 [![npm](https://img.shields.io/npm/v/codex-on-any-devices)](https://www.npmjs.com/package/codex-on-any-devices)
-[![Docker](https://img.shields.io/badge/docker-ghcr.io-blue)](https://github.com/SeleiXi/CodexOnAnyDevices/pkgs/container/codex-on-any-devices-relay)
+[![Docker Relay](https://img.shields.io/badge/docker-relay-blue)](https://github.com/SeleiXi/CodexOnAnyDevices/pkgs/container/codex-on-any-devices-relay)
+[![Docker Web](https://img.shields.io/badge/docker-web--client-blue)](https://github.com/SeleiXi/CodexOnAnyDevices/pkgs/container/codex-on-any-devices-web-client)
 [![License](https://img.shields.io/github/license/SeleiXi/CodexOnAnyDevices)](LICENSE)
 
 </div>
