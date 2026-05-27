@@ -3,7 +3,9 @@
 [English](README.md) | [中文](README-zh.md)
 
 CodexOnAnyDevices 让你可以一边在外健身一边vibe coding，或者在你的windows上也可以用codex-app来操作你远程linux服务器的项目（官方 Codex app 目前并不直接支持让你在你的windows机器上用codex跑你一个在服务器上的project）。
-- 此项目发布早于codex官方手机app codex，并且目前官方不支持在windows上远程（需要自己调设定，且不稳定）以及在电脑上操作你在linux/其他电脑上的codex
+- 此项目发布早于codex官方手机app codex，并且目前官方不支持在远程操控windows的codex（需要自己调设定+使用不稳定/连接速度慢+欠缺某些feature）
+- 官方版本无法让你在你的laptop上操作你在linux/其他电脑上的codex
+- 官方项目是Codex Mobile / 电脑端Codex强绑定同账号，RAD绑定的是电脑codex runtime，你用什么账号都无所谓
 - 此外，官方版本目前仍然有不稳定的地方，本项目全部开源，因此你可以随便魔改/新加feat
 
 ## Demo
