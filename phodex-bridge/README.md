@@ -18,4 +18,4 @@ The CLI also exposes `codexonanydevices` as a compact alias.
 
 ## Source
 
-https://github.com/SeleiXi/RemodexOnAnyDevices
+https://github.com/SeleiXi/CodexOnAnyDevices

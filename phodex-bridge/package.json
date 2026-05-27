@@ -33,11 +33,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/SeleiXi/RemodexOnAnyDevices.git",
+    "url": "git+https://github.com/SeleiXi/CodexOnAnyDevices.git",
     "directory": "phodex-bridge"
   },
-  "homepage": "https://github.com/SeleiXi/RemodexOnAnyDevices#readme",
+  "homepage": "https://github.com/SeleiXi/CodexOnAnyDevices#readme",
   "bugs": {
-    "url": "https://github.com/SeleiXi/RemodexOnAnyDevices/issues"
+    "url": "https://github.com/SeleiXi/CodexOnAnyDevices/issues"
   }
 }
