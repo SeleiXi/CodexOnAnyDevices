@@ -388,14 +388,40 @@ class RemodexWebClient {
     this.isInitialized = true;
   }
 
-  async listThreads(limit = 40) {
-    const response = await this.sendRequest("thread/list", {
-      sourceKinds: THREAD_LIST_SOURCE_KINDS,
-      cursor: null,
-      limit,
-    });
-    const result = response.result || {};
-    const items = result.data || result.items || result.threads || [];
+  async listThreads(options = {}) {
+    const pageSize = typeof options === "number"
+      ? options
+      : Number(options.pageSize || 40);
+    const limit = Number.isFinite(pageSize) && pageSize > 0 ? Math.floor(pageSize) : 40;
+    const maxPages = typeof options === "object" && Number.isFinite(Number(options.maxPages))
+      ? Math.max(1, Math.floor(Number(options.maxPages)))
+      : 20;
+    const items = [];
+    let cursor = null;
+    const seenCursors = new Set();
+
+    for (let page = 0; page < maxPages; page += 1) {
+      const response = await this.sendRequest("thread/list", {
+        sourceKinds: THREAD_LIST_SOURCE_KINDS,
+        cursor,
+        limit,
+      });
+      const result = response.result || {};
+      items.push(...(result.data || result.items || result.threads || []));
+
+      const nextCursor = stringOrEmpty(
+        result.nextCursor
+        || result.next_cursor
+        || result.next
+        || result.cursor
+      );
+      if (!nextCursor || seenCursors.has(nextCursor)) {
+        break;
+      }
+      seenCursors.add(nextCursor);
+      cursor = nextCursor;
+    }
+
     const pinnedThreadIDs = new Set(readPinnedThreadIds());
     return items
       .map((threadObject) => decodeThreadSummary(threadObject, pinnedThreadIDs))

@@ -215,6 +215,61 @@ test("readThread falls back when includeTurns hits a transient empty rollout", a
   assert.equal(result.messages.length, 0);
 });
 
+test("listThreads follows runtime pagination", async () => {
+  const client = createClientStub();
+  const requests = [];
+
+  client.sendRequest = async (method, params) => {
+    requests.push({ method, params });
+    if (!params.cursor) {
+      return {
+        result: {
+          data: [
+            { id: "thread-1", title: "First" },
+          ],
+          nextCursor: "page-2",
+        },
+      };
+    }
+
+    return {
+      result: {
+        threads: [
+          { id: "thread-2", title: "Second" },
+        ],
+      },
+    };
+  };
+
+  const threads = await client.listThreads({ pageSize: 1, maxPages: 5 });
+
+  assert.deepEqual(threads.map((thread) => thread.id), ["thread-1", "thread-2"]);
+  assert.deepEqual(requests.map((request) => request.params.cursor), [null, "page-2"]);
+  assert.equal(requests[0].params.limit, 1);
+});
+
+test("listThreads stops when the runtime repeats a cursor", async () => {
+  const client = createClientStub();
+  const requests = [];
+
+  client.sendRequest = async (method, params) => {
+    requests.push({ method, params });
+    return {
+      result: {
+        data: [
+          { id: params.cursor ? `thread-${params.cursor}` : "thread-first" },
+        ],
+        next_cursor: "same-cursor",
+      },
+    };
+  };
+
+  const threads = await client.listThreads({ pageSize: 1, maxPages: 10 });
+
+  assert.deepEqual(threads.map((thread) => thread.id), ["thread-first", "thread-same-cursor"]);
+  assert.equal(requests.length, 2);
+});
+
 test("listModels follows runtime pagination and dedupes models", async () => {
   const client = createClientStub();
   const requests = [];
